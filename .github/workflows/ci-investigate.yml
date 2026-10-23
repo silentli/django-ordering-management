@@ -2,7 +2,7 @@ name: Investigate CI failure
 
 on:
   workflow_run:
-    workflows: [Test]
+    workflows: [Lint]
     branches: [main]
     types: [completed]
 
@@ -18,7 +18,7 @@ jobs:
   collect:
     if: >-
       github.repository_id == '896855817' &&
-      github.event.workflow_run.workflow_id == 161543607 &&
+      github.event.workflow_run.workflow_id == 161543606 &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.conclusion == 'failure' &&
