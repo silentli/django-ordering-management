@@ -32,7 +32,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          /Users/guolee/Desktop/github/ci-autofix-agent/.runtime/collector-venv/bin/python -I -m ci_autofix.cli \
+          : "${CI_AUTOFIX_HOME:?Configure CI_AUTOFIX_HOME on this runner}"
+          case "$CI_AUTOFIX_HOME" in
+            /*) ;;
+            *) echo "CI_AUTOFIX_HOME must be an absolute path" >&2; exit 2 ;;
+          esac
+          "$CI_AUTOFIX_HOME/collector-venv/bin/python" -I -m ci_autofix.cli \
             --event-file "$GITHUB_EVENT_PATH" \
-            --config /Users/guolee/Desktop/github/ci-autofix-agent/.runtime/control/target.toml \
-            --state-dir /Users/guolee/Desktop/github/ci-autofix-agent/.runtime/state
+            --config "$CI_AUTOFIX_HOME/control/target.toml" \
+            --state-dir "$CI_AUTOFIX_HOME/state"
