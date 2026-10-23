@@ -1,0 +1,38 @@
+name: Investigate CI failure
+
+on:
+  workflow_run:
+    workflows: [Test]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ci-investigator
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: >-
+      github.repository_id == '896855817' &&
+      github.event.workflow_run.workflow_id == 161543607 &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.id == 896855817
+    runs-on: [self-hosted, macOS, X64, ci-investigator]
+    timeout-minutes: 5
+    steps:
+      # Deliberately no checkout, installation, app code or remote artifacts.
+      - name: Collect read-only failure evidence
+        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          /Users/guolee/Desktop/github/ci-autofix-agent/.runtime/collector-venv/bin/python -I -m ci_autofix.cli \
+            --event-file "$GITHUB_EVENT_PATH" \
+            --config /Users/guolee/Desktop/github/ci-autofix-agent/.runtime/control/target.toml \
+            --state-dir /Users/guolee/Desktop/github/ci-autofix-agent/.runtime/state
