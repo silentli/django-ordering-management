@@ -1,0 +1,1 @@
+"""Isolated acceptance example package."""
