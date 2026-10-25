@@ -83,7 +83,6 @@ def find_menu_item_by_name(
         return partial_match
 
     # Try fuzzy match only if enabled
-    # ruff: noqa: E402
     from difflib import get_close_matches
 
     menu_item_names = list(

@@ -13,7 +13,7 @@ TEST_STAFF_PASSWORD = 'test_staff_password'  # Must match the value in conftest.
 @pytest.fixture
 def staff_user():
     """Fixture providing a staff user."""
-    user, created = User.objects.get_or_create(
+    user, _created = User.objects.get_or_create(
         username='staff', defaults={'is_staff': True, 'is_active': True}
     )
     # Set the password to match settings.STAFF_PASSWORD
