@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  collect:
+  repair:
     if: >-
       github.repository_id == '896855817' &&
       github.event.workflow_run.workflow_id == 161543606 &&
@@ -24,10 +24,10 @@ jobs:
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.head_repository.id == 896855817
     runs-on: [self-hosted, macOS, X64, ci-investigator]
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
-      # Deliberately no checkout, installation, app code or remote artifacts.
-      - name: Collect read-only failure evidence
+      # No checkout/install, App key, publishing credential or Publisher invocation.
+      - name: Collect, investigate and validate in the trusted local pipeline
         shell: /bin/bash --noprofile --norc -e -o pipefail {0}
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -37,7 +37,6 @@ jobs:
             /*) ;;
             *) echo "CI_AUTOFIX_HOME must be an absolute path" >&2; exit 2 ;;
           esac
-          "$CI_AUTOFIX_HOME/collector-venv/bin/python" -I -m ci_autofix.cli \
+          "$CI_AUTOFIX_HOME/agent-venv/bin/python" -I -m ci_autofix.pipeline_cli \
             --event-file "$GITHUB_EVENT_PATH" \
-            --config "$CI_AUTOFIX_HOME/control/target.toml" \
-            --state-dir "$CI_AUTOFIX_HOME/state"
+            --runtime-root "$CI_AUTOFIX_HOME"
