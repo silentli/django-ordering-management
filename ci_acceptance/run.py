@@ -56,15 +56,15 @@ def main():
                 home / 'build-tools.lock',
             ]
         )
-        clean = subprocess.run(
+        clean_code = "\n".join(
             [
-                str(application),
-                '-I',
-                '-c',
-                "import importlib.metadata,json;"
-                "print(json.dumps(sorted(d.metadata['Name'] "
-                "for d in importlib.metadata.distributions())))",
-            ],
+                "import importlib.metadata,json",
+                "names = sorted(d.metadata['Name'] for d in importlib.metadata.distributions())",
+                "print(json.dumps(names))",
+            ]
+        )
+        clean = subprocess.run(
+            [str(application), '-I', '-c', clean_code],
             check=True,
             capture_output=True,
             text=True,
