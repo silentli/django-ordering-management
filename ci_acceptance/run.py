@@ -56,11 +56,11 @@ def main():
                 home / 'build-tools.lock',
             ]
         )
-        clean_code = "\n".join(
+        clean_code = '\n'.join(
             [
-                "import importlib.metadata,json",
+                'import importlib.metadata,json',
                 "names = sorted(d.metadata['Name'] for d in importlib.metadata.distributions())",
-                "print(json.dumps(names))",
+                'print(json.dumps(names))',
             ]
         )
         clean = subprocess.run(
