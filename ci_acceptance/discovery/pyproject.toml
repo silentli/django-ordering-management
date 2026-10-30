@@ -10,4 +10,4 @@ dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["other_package*"]
+include = ["ci_demo"]
