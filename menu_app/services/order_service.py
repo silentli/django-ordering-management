@@ -4,7 +4,7 @@ This module manages orders and their items.
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Mapping, Optional
 
 from django.db import transaction
 
@@ -56,6 +56,19 @@ def create_order() -> order.Order:
     except Exception as e:
         logger.error(f'Error creating order: {e!s}')
         raise RuntimeError(f'Failed to create order: {e!s}')
+
+
+@transaction.atomic
+def place_order(cart: Mapping[str, int]) -> order.Order:
+    """Create a whole order and deduct stock, rolling back every item on failure."""
+    if not cart:
+        raise ValueError('Cart cannot be empty')
+
+    new_order = create_order()
+    # Use a consistent inventory update order to avoid checkout deadlocks.
+    for menu_item_id, quantity in sorted(cart.items(), key=lambda item: int(item[0])):
+        add_item_to_order(new_order.id, int(menu_item_id), quantity)
+    return new_order
 
 
 @transaction.atomic

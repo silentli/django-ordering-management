@@ -95,22 +95,14 @@ class MenuListView(ListView):
                 # Create order from cart
                 if cart:
                     try:
-                        # Create new order
-                        new_order = order_service.create_order()
-
-                        # Add items to order
-                        for menu_item_id, quantity in cart.items():
-                            order_service.add_item_to_order(
-                                new_order.id, int(menu_item_id), quantity
-                            )
-
-                        messages.success(request, 'Order placed successfully!')
+                        order_service.place_order(cart)
                     except Exception as e:
                         messages.error(request, f'Error processing order: {e!s}')
-                    finally:
-                        # Clear cart regardless of success or failure
+                    else:
+                        # The order transaction has succeeded; only now clear the cart.
                         del request.session['cart']
                         request.session.modified = True
+                        messages.success(request, 'Order placed successfully!')
                     return redirect('menu_app:menu_list')
                 else:
                     messages.warning(request, 'Your cart is empty!')

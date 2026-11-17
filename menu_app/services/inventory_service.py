@@ -2,6 +2,7 @@ import logging
 from typing import Dict, List, Optional
 
 from django.db import transaction
+from django.db.models import F
 
 from menu_app.models import inventory, menu_item
 from menu_app.services import db_utils, menu_utils
@@ -183,19 +184,13 @@ def remove_stock(menu_item: menu_item.MenuItem, quantity: int) -> None:
     if quantity <= 0:
         raise ValueError('Quantity must be positive')
 
-    if not menu_utils.check_item_availability(menu_item, quantity):
+    # Check and decrement in one SQL statement so competing checkouts cannot
+    # both spend the same stock, even if an earlier availability check passed.
+    updated = inventory.InventoryItem.objects.filter(
+        menu_item=menu_item, quantity__gte=quantity
+    ).update(quantity=F('quantity') - quantity)
+    if not updated:
         raise ValueError(f'Insufficient stock for {menu_item.name}')
-
-    try:
-        inventory_item = get_inventory(menu_item)
-        if not inventory_item:
-            raise ValueError(f'No inventory found for menu item {menu_item.name}')
-
-        inventory_item.quantity -= quantity
-        db_utils.update_model_instance(inventory_item, quantity=inventory_item.quantity)
-    except Exception as e:
-        logger.error(f'Error removing stock from {menu_item.name}: {e!s}')
-        raise RuntimeError(f'Failed to remove stock: {e!s}')
 
 
 def check_availability(menu_item: menu_item.MenuItem, quantity: int) -> bool:
