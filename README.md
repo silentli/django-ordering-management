@@ -75,15 +75,23 @@ Common linting rules:
 The project includes pre-commit hooks to ensure code quality before commits:
 
 ```bash
-# Install pre-commit
-pip install pre-commit
+# Create and activate the development environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install pre-commit in this environment
+python -m pip install pre-commit==3.6.2
 
 # Install the git hooks
-pre-commit install
+python -m pre_commit install
 
 # Run pre-commit on all files
-pre-commit run --all-files
+python -m pre_commit run --all-files
 ```
+
+The Git hook uses the Python environment that installed it. After moving or
+recreating that environment, activate it and run `python -m pre_commit install`
+again. Ruff is pinned to `0.11.9` in the hooks, dependencies, and CI.
 
 ## Testing
 
