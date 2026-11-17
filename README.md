@@ -91,7 +91,7 @@ pre-commit run --all-files
 
 1. Start the test database:
 ```bash
-docker compose -f docker/docker-compose.test.yml up -d db
+docker compose -f docker/docker-compose.test.yml up -d --wait db
 ```
 
 2. Install test dependencies:
@@ -99,21 +99,29 @@ docker compose -f docker/docker-compose.test.yml up -d db
 pip install -r requirements/test.txt
 ```
 
-3. Run database migrations:
-```bash
-DJANGO_ENV=test python manage.py migrate
-```
+No manual migrations are required. pytest-django creates a separate database named
+`test_<POSTGRES_DB>`, applies migrations, and drops it after the test run.
+For example, `POSTGRES_DB=menu_management_test` uses `test_menu_management_test`.
+The PostgreSQL user must have permission to create databases (`CREATEDB`).
+Use the dedicated test PostgreSQL instance, configured through `.env.test` or
+environment variables, rather than a production server.
 
 ### Running Tests
 
 Run tests using pytest with the correct environment:
 
 ```bash
-# Run all tests with coverage report
-DJANGO_ENV=test python -m pytest --cov=menu_management --cov-report=term-missing
+# Run all tests
+DJANGO_ENV=test python -m pytest
 
 # Run specific test file
 DJANGO_ENV=test python -m pytest menu_app/tests/models/test_models.py
+
+# Optionally keep the test database between local runs
+DJANGO_ENV=test python -m pytest --reuse-db
+
+# Rebuild a reused test database after migration changes
+DJANGO_ENV=test python -m pytest --reuse-db --create-db
 ```
 
 ### Test Suite Coverage
