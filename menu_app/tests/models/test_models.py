@@ -1,6 +1,10 @@
-import pytest
+from decimal import Decimal
 
-from menu_app.models.order import OrderItem
+import pytest
+from django.db import IntegrityError, transaction
+from django.db.models.expressions import RawSQL
+
+from menu_app.models import MenuItem, OrderItem
 
 
 def assert_menu_item(menu_item, test_data):
@@ -41,3 +45,37 @@ def test_order_creation(order, menu_item):
     )
     assert order_item.quantity == 1
     assert order_item.price_at_time_of_order == menu_item.price
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    'fixture_name,field,value',
+    [
+        ('menu_item', 'price', Decimal('0')),
+        ('menu_item', 'price', Decimal('NaN')),
+        ('menu_item', 'category', 'unknown'),
+        ('inventory_item', 'quantity', -1),
+        ('inventory_item', 'low_stock_threshold', 0),
+        ('order', 'status', 'unknown'),
+        ('order_item', 'quantity', 0),
+        ('order_item', 'price_at_time_of_order', Decimal('-1')),
+        ('order_item', 'price_at_time_of_order', Decimal('NaN')),
+    ],
+)
+def test_database_rejects_invalid_updates(request, fixture_name, field, value):
+    """Bypass Python validation and field conversion to exercise database constraints."""
+    instance = request.getfixturevalue(fixture_name)
+    original_value = getattr(instance, field)
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        type(instance).objects.filter(pk=instance.pk).update(**{field: RawSQL('%s', [value])})
+
+    instance.refresh_from_db()
+    assert getattr(instance, field) == original_value
+
+
+@pytest.mark.django_db
+def test_database_rejects_invalid_bulk_inserts():
+    with pytest.raises(IntegrityError), transaction.atomic():
+        MenuItem.objects.bulk_create([MenuItem(name='Invalid price', category='main', price=0)])
+    assert not MenuItem.objects.exists()

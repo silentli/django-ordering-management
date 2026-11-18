@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.urls import reverse
 
+from menu_app.models import MenuItem
 from menu_app.services import inventory_service, order_service
 
 # Test password for staff authentication
@@ -42,6 +43,18 @@ def test_staff_login_failure(client):
     response = client.post(reverse('menu_app:staff_login'), {'password': 'wrong_password'})
     assert response.status_code == 200  # Stay on login page
     assert '_auth_user_id' not in client.session
+
+
+@pytest.mark.django_db
+def test_menu_form_rejects_zero_price(client, staff_user):
+    client.force_login(staff_user)
+    response = client.post(
+        reverse('menu_app:staff_menu_create'),
+        {'name': 'Invalid price', 'category': 'main', 'price': '0.00'},
+    )
+    assert response.status_code == 200
+    assert 'price' in response.context['form'].errors
+    assert not MenuItem.objects.exists()
 
 
 @pytest.mark.django_db

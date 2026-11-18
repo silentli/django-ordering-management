@@ -4,9 +4,15 @@ from typing import ClassVar, List, Tuple
 
 from django.db import models
 
-from menu_app.models.menu_item import MenuItem
+from menu_app.models.menu_item import MAX_ITEM_PRICE, MenuItem
 
 logger = logging.getLogger(__name__)
+
+
+class OrderStatus(models.TextChoices):
+    PENDING = 'pending', 'Pending'
+    COMPLETED = 'completed', 'Completed'
+    CANCELLED = 'cancelled', 'Cancelled'
 
 
 class Order(models.Model):
@@ -14,11 +20,7 @@ class Order(models.Model):
     Represents a customer order with its items and status.
     """
 
-    STATUS_CHOICES: ClassVar[List[Tuple[str, str]]] = [
-        ('pending', 'Pending'),
-        ('completed', 'Completed'),
-        ('cancelled', 'Cancelled'),
-    ]
+    STATUS_CHOICES: ClassVar[List[Tuple[str, str]]] = OrderStatus.choices
 
     # Fields
     created_at = models.DateTimeField(auto_now_add=True)
@@ -27,6 +29,11 @@ class Order(models.Model):
 
     class Meta:
         ordering: ClassVar[List[str]] = ['-created_at']
+        constraints: ClassVar[List[models.CheckConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=OrderStatus.values), name='order_status_valid'
+            ),
+        ]
 
     def __str__(self):
         return f'Order {self.id} ({self.status})'
@@ -101,6 +108,18 @@ class OrderItem(models.Model):
         verbose_name_plural = 'Order Items'
         ordering: ClassVar[List[str]] = ['order', 'menu_item__name']
         unique_together: ClassVar[List[str]] = ['order', 'menu_item']
+        constraints: ClassVar[List[models.CheckConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0), name='order_item_quantity_positive'
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    price_at_time_of_order__gt=0,
+                    price_at_time_of_order__lte=MAX_ITEM_PRICE,
+                ),
+                name='order_item_price_positive',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.quantity} x {self.menu_item.name} (${self.subtotal})'
@@ -114,7 +133,7 @@ class OrderItem(models.Model):
 
     def save(self, *args, **kwargs):
         # Store the price at the time of ordering if not already set
-        if not self.price_at_time_of_order:
+        if self.price_at_time_of_order is None:
             self.price_at_time_of_order = self.menu_item.price
         self.clean()
         super().save(*args, **kwargs)

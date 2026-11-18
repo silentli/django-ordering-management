@@ -20,6 +20,12 @@ class InventoryItem(models.Model):
         verbose_name = 'Inventory Item'
         verbose_name_plural = 'Inventory Items'
         ordering: ClassVar[List[str]] = ['menu_item__category', 'menu_item__name']
+        constraints: ClassVar[List[models.CheckConstraint]] = [
+            models.CheckConstraint(
+                condition=models.Q(low_stock_threshold__gt=0),
+                name='inventory_threshold_positive',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.menu_item.name} - {self.quantity} available'

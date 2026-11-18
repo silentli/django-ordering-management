@@ -154,17 +154,9 @@ def add_menu_item(name: str, price: float, category: str) -> menu_item.MenuItem:
         MenuItem: The created menu item
     """
     try:
-        # Validate inputs
-        if not name or not name.strip():
-            raise ValueError('Menu item name cannot be empty')
-        if price <= 0:
-            raise ValueError('Price must be positive')
-        if not category or not category.strip():
-            raise ValueError('Category cannot be empty')
-
-        # Standardize inputs
-        name = name.strip()
-        category = category.strip().lower()
+        name = validate_name(name)
+        price = validate_price(price)
+        category = validate_category(category)
 
         # Check if menu item already exists
         if menu_item.MenuItem.objects.filter(name=name).exists():
