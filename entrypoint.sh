@@ -13,12 +13,9 @@ while ! nc -z -w 1 "$POSTGRES_HOST" "$POSTGRES_PORT"; do
 done
 echo "PostgreSQL is up and running!"
 
-# Create and apply migrations
-echo "Creating migrations..."
-python manage.py makemigrations
-
+# Apply migrations committed during development
 echo "Applying migrations..."
-python manage.py migrate
+python manage.py migrate --noinput
 
 # Load initial data
 echo "Loading initial data..."
