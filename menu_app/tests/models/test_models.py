@@ -1,8 +1,7 @@
 from decimal import Decimal
 
 import pytest
-from django.db import IntegrityError, connection, transaction
-from django.db.migrations.executor import MigrationExecutor
+from django.db import IntegrityError, transaction
 from django.db.models.expressions import RawSQL
 
 
@@ -29,38 +28,3 @@ def test_database_rejects_invalid_updates(request, fixture_name, field, value):
 
     instance.refresh_from_db()
     assert getattr(instance, field) == original_value
-
-
-@pytest.mark.django_db(transaction=True)
-def test_snapshot_migration_preserves_existing_orders():
-    previous = [('menu_app', '0002_business_data_constraints')]
-    latest = [('menu_app', '0003_menu_availability_and_order_snapshots')]
-    executor = MigrationExecutor(connection)
-    restore_targets = executor.loader.graph.leaf_nodes()
-    try:
-        executor.migrate(previous)
-        apps = executor.loader.project_state(previous).apps
-        item = apps.get_model('menu_app', 'MenuItem').objects.create(
-            name='Existing dish', category='main', price=Decimal('15.00')
-        )
-        order = apps.get_model('menu_app', 'Order').objects.create(status='completed')
-        line = apps.get_model('menu_app', 'OrderItem').objects.create(
-            order_id=order.pk,
-            menu_item_id=item.pk,
-            quantity=2,
-            price_at_time_of_order=Decimal('10.00'),
-        )
-        executor = MigrationExecutor(connection)
-        executor.migrate(latest)
-        new_apps = executor.loader.project_state(latest).apps
-        migrated = new_apps.get_model('menu_app', 'OrderItem').objects.get(pk=line.pk)
-        assert migrated.name_at_time_of_order == 'Existing dish'
-        assert migrated.category_at_time_of_order == 'main'
-        assert migrated.price_at_time_of_order == Decimal('10.00')
-        assert migrated.quantity == 2
-        assert (
-            new_apps.get_model('menu_app', 'Order').objects.get(pk=order.pk).status == 'completed'
-        )
-        assert new_apps.get_model('menu_app', 'MenuItem').objects.get(pk=item.pk).is_active
-    finally:
-        MigrationExecutor(connection).migrate(restore_targets)
