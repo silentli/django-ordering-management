@@ -1,52 +1,55 @@
 import json
-import os
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
+from django.db import IntegrityError, transaction
 
-from menu_app.models import InventoryItem, MenuItem
+from menu_app.models import MenuItem
+from menu_app.services import inventory_service, menu_service
 
 
 class Command(BaseCommand):
-    help = 'Load initial menu items and inventory data from JSON file'
+    help = 'Explicitly load demo menu and inventory data into an empty menu'
+
+    def add_arguments(self, parser):
+        parser.add_argument('data_file', type=Path, help='Path to the demo menu JSON file')
 
     def handle(self, *args, **options):
-        # Get the path to the JSON file
-        data_file = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            'data',
-            'initial_menu_items.json',
-        )
+        if MenuItem.objects.exists():
+            self.stdout.write(self.style.WARNING('Menu items already exist, skipping data load'))
+            return
 
         try:
-            # Read the JSON file
-            with open(data_file, 'r') as f:
-                data = json.load(f)
-        except FileNotFoundError:
-            self.stdout.write(self.style.ERROR(f'Data file not found: {data_file}'))
-            return
-        except json.JSONDecodeError:
-            self.stdout.write(self.style.ERROR(f'Invalid JSON in file: {data_file}'))
-            return
+            with options['data_file'].open(encoding='utf-8') as source:
+                data = json.load(source, parse_float=Decimal)
+        except (OSError, ValueError) as error:
+            raise CommandError(f'Unable to read demo data: {error}') from error
 
-        # Create menu items if none exist
-        if not MenuItem.objects.exists():
-            for item_data in data['menu_items']:
-                try:
-                    menu_item = MenuItem.objects.create(
-                        category=item_data['category'],
+        try:
+            quantity = data['initial_inventory_quantity']
+            if type(quantity) is not int or quantity < 0:
+                raise ValueError('Initial inventory quantity must be a non-negative integer')
+            if not isinstance(data['menu_items'], list) or not data['menu_items']:
+                raise ValueError('Menu items must be a non-empty list')
+
+            with transaction.atomic():
+                for item_data in data['menu_items']:
+                    item = menu_service.add_menu_item(
                         name=item_data['name'],
-                        price=item_data['price'],
+                        price=Decimal(str(item_data['price'])),
+                        category=item_data['category'],
                     )
-                    # Create inventory for each menu item
-                    InventoryItem.objects.create(
-                        menu_item=menu_item, quantity=data['initial_inventory_quantity']
-                    )
-                    self.stdout.write(self.style.SUCCESS(f'Created menu item: {item_data["name"]}'))
-                except Exception as e:
-                    self.stdout.write(
-                        self.style.ERROR(f'Error creating menu item {item_data["name"]}: {e!s}')
-                    )
+                    if quantity:
+                        inventory_service.add_stock(item, quantity)
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            AttributeError,
+            InvalidOperation,
+            IntegrityError,
+        ) as error:
+            raise CommandError(f'Unable to import demo data: {error}') from error
 
-            self.stdout.write(self.style.SUCCESS('Successfully loaded initial data'))
-        else:
-            self.stdout.write(self.style.WARNING('Menu items already exist, skipping data load'))
+        self.stdout.write(self.style.SUCCESS('Successfully loaded initial data'))

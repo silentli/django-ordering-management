@@ -17,9 +17,5 @@ echo "PostgreSQL is up and running!"
 echo "Applying migrations..."
 python manage.py migrate --noinput
 
-# Load initial data
-echo "Loading initial data..."
-python manage.py load_initial_data
-
 # Run the command provided as arguments to this script
 exec "$@"
