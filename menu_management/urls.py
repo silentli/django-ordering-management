@@ -19,8 +19,10 @@ from django.contrib import admin
 from django.urls import include, path
 
 from menu_app.views import staff_views
+from menu_management.views import health
 
 urlpatterns = [
+    path('health/', health, name='health'),
     path('admin/', admin.site.urls),
     path('menu/', include('menu_app.urls')),
     # Staff URLs

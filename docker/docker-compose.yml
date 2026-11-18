@@ -12,7 +12,8 @@ services:
       - static_volume:/app/staticfiles:ro
       - media_volume:/app/media
     depends_on:
-      - web
+      web:
+        condition: service_healthy
     networks:
       - app_network
 
@@ -37,6 +38,22 @@ services:
       - DJANGO_SETTINGS_MODULE=menu_management.settings.production
       - DJANGO_ENV=production
     command: gunicorn menu_management.wsgi:application --bind 0.0.0.0:8000
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import os
+          from http.client import HTTPConnection
+          host = os.environ.get('ALLOWED_HOSTS', 'localhost').split(',')[0].strip().lstrip('.')
+          connection = HTTPConnection('127.0.0.1', 8000, timeout=3)
+          connection.request('GET', '/health/', headers={'Host': host if host != '*' else 'localhost'})
+          raise SystemExit(0 if connection.getresponse().status == 200 else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
     networks:
       - app_network
 

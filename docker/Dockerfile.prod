@@ -8,6 +8,7 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    coreutils \
     netcat-openbsd \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
@@ -40,4 +41,4 @@ EXPOSE 8000
 ENTRYPOINT ["/bin/sh", "/app/entrypoint.sh"]
 
 # Run the application
-CMD ["gunicorn", "menu_management.wsgi:application", "--bind", "0.0.0.0:8000"] 
+CMD ["gunicorn", "menu_management.wsgi:application", "--bind", "0.0.0.0:8000"]
