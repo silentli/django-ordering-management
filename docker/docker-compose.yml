@@ -9,7 +9,7 @@ services:
     ports:
       - "80:80"
     volumes:
-      - static_volume:/app/staticfiles
+      - static_volume:/app/staticfiles:ro
       - media_volume:/app/media
     depends_on:
       - web
@@ -22,19 +22,36 @@ services:
       dockerfile: docker/Dockerfile.prod
     restart: unless-stopped
     volumes:
-      - static_volume:/app/staticfiles
+      - static_volume:/app/staticfiles:ro
       - media_volume:/app/media
     expose:
       - "8000"
     depends_on:
       db:
         condition: service_healthy
+      collect-static:
+        condition: service_completed_successfully
     env_file:
       - ../menu_management/settings/env/.env
     environment:
       - DJANGO_SETTINGS_MODULE=menu_management.settings.production
       - DJANGO_ENV=production
     command: gunicorn menu_management.wsgi:application --bind 0.0.0.0:8000
+    networks:
+      - app_network
+
+  collect-static:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    restart: "no"
+    # Existing static volumes may be owned by root from earlier deployments.
+    user: "0:0"
+    volumes:
+      - static_volume:/app/staticfiles
+    environment:
+      - DJANGO_SETTINGS_MODULE=menu_management.settings.production
+    entrypoint: [python, manage.py, collectstatic, --noinput, --clear]
     networks:
       - app_network
 
