@@ -4,8 +4,7 @@ from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.urls import reverse
 
-from menu_app.models.order import Order
-from menu_app.services import inventory_service
+from menu_app.services import inventory_service, order_service
 
 # Test password for staff authentication
 TEST_STAFF_PASSWORD = 'test_staff_password'  # Must match the value in conftest.py
@@ -60,9 +59,10 @@ def test_staff_dashboard_view(client, staff_user):
 
 
 @pytest.mark.django_db
-def test_order_management_view(client, staff_user, menu_item, order):
+def test_order_management_view(client, staff_user, menu_item, inventory_item):
     """Test order management functionality."""
     client.login(username='staff', password=settings.STAFF_PASSWORD)
+    order = order_service.place_order({str(menu_item.pk): 1})
 
     # Test order list view
     response = client.get(reverse('menu_app:staff_order_list'))
@@ -76,9 +76,11 @@ def test_order_management_view(client, staff_user, menu_item, order):
     assert response.status_code == 302  # Redirect after completion
     order.refresh_from_db()
     assert order.status == 'completed'
+    inventory_item.refresh_from_db()
+    assert inventory_item.quantity == 4
 
     # Test canceling an order
-    new_order = Order.objects.create(status='pending')
+    new_order = order_service.place_order({str(menu_item.pk): 1})
     response = client.post(
         reverse('menu_app:staff_order_detail', args=[new_order.id]),
         {'action': 'cancel'},
@@ -86,6 +88,24 @@ def test_order_management_view(client, staff_user, menu_item, order):
     assert response.status_code == 302  # Redirect after cancellation
     new_order.refresh_from_db()
     assert new_order.status == 'cancelled'
+    inventory_item.refresh_from_db()
+    assert inventory_item.quantity == 4
+
+
+@pytest.mark.django_db
+def test_customers_cannot_cancel_orders(client, django_user_model, menu_item, inventory_item):
+    placed_order = order_service.place_order({str(menu_item.pk): 2})
+    url = reverse('menu_app:staff_order_detail', args=[placed_order.pk])
+
+    assert client.post(url, {'action': 'cancel'}).status_code in (302, 403)
+    customer = django_user_model.objects.create_user(username='customer')
+    client.force_login(customer)
+    assert client.post(url, {'action': 'cancel'}).status_code in (302, 403)
+
+    placed_order.refresh_from_db()
+    inventory_item.refresh_from_db()
+    assert placed_order.status == 'pending'
+    assert inventory_item.quantity == 3
 
 
 @pytest.mark.django_db

@@ -15,6 +15,7 @@
                     <i class="fas fa-check"></i> Complete Order
                 </button>
             </form>
+            {% if user.is_staff %}
             <form method="post" class="d-inline ms-2">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="cancel">
@@ -22,6 +23,7 @@
                     <i class="fas fa-times"></i> Cancel Order
                 </button>
             </form>
+            {% endif %}
             {% endif %}
             <a href="{% url 'menu_app:staff_order_list' %}" class="btn btn-secondary ms-2">
                 <i class="fas fa-arrow-left"></i> Back to Orders
@@ -86,4 +88,4 @@
         </div>
     </div>
 </div>
-{% endblock %} 
+{% endblock %}

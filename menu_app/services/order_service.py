@@ -6,6 +6,8 @@ This module manages orders and their items.
 import logging
 from typing import List, Mapping, Optional
 
+from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 
 from menu_app.models import menu_item, order
@@ -44,6 +46,17 @@ def get_all_orders() -> List[order.Order]:
     Get all orders with their items
     """
     return list(_get_base_order_queryset().all())
+
+
+def _get_pending_order_for_update(order_id: int) -> order.Order:
+    """Lock the order before checking whether a business operation is allowed."""
+    try:
+        order_obj = order.Order.objects.select_for_update().get(pk=order_id)
+    except order.Order.DoesNotExist:
+        raise ValueError(f'Order {order_id} not found') from None
+    if not order_obj.is_modifiable():
+        raise ValueError('Only pending orders can be modified')
+    return order_obj
 
 
 @transaction.atomic
@@ -89,9 +102,7 @@ def add_item_to_order(order_id: str, menu_item_id: int, quantity: int = 1) -> No
         raise ValueError('Quantity must be positive')
 
     try:
-        order_obj = get_order(order_id)
-        if not order_obj:
-            raise ValueError(f'Order {order_id} not found')
+        order_obj = _get_pending_order_for_update(order_id)
 
         menu_item_obj = menu_utils.get_menu_item(menu_item_id=menu_item_id)
         if not menu_item_obj:
@@ -143,9 +154,7 @@ def remove_item_from_order(order_id: str, menu_item_id: int, quantity: int = 1) 
         raise ValueError('Quantity must be positive')
 
     try:
-        order_obj = get_order(order_id)
-        if not order_obj:
-            raise ValueError(f'Order {order_id} not found')
+        order_obj = _get_pending_order_for_update(order_id)
 
         menu_item_obj = menu_utils.get_menu_item(menu_item_id=menu_item_id)
         if not menu_item_obj:
@@ -163,7 +172,7 @@ def remove_item_from_order(order_id: str, menu_item_id: int, quantity: int = 1) 
         else:
             # Restore all inventory for this item
             inventory_service.add_stock(menu_item_obj, existing_item.quantity)
-            db_utils.delete_model_instance(existing_item)
+            existing_item.delete()
     except Exception as e:
         logger.error(f'Error removing item from order {order_id}: {e!s}')
         raise RuntimeError(f'Failed to remove item from order: {e!s}')
@@ -233,36 +242,21 @@ def get_item_quantity(order_id: str, menu_item_id: int) -> int:
 
 
 @transaction.atomic
-def cancel_order(order_id: str) -> None:
-    """
-    Cancel an order and restore inventory
+def complete_order(order_id: int) -> None:
+    """Complete a pending order without changing its reserved inventory."""
+    order_obj = _get_pending_order_for_update(order_id)
+    order_obj.status = 'completed'
+    order_obj.save(update_fields=['status', 'updated_at'])
 
-    Args:
-        order_id: The ID of the order to cancel
 
-    Raises:
-        ValueError: If order is not found or not in pending status
-        RuntimeError: If there are issues cancelling the order
-    """
-    try:
-        order_obj = get_order(order_id)
-        if not order_obj:
-            raise ValueError(f'Order {order_id} not found')
-
-        if order_obj.status != 'pending':
-            raise ValueError('Only pending orders can be cancelled')
-
-        # Restore inventory for all items in the order
-        for order_item in order_obj.items.all():
-            try:
-                inventory_service.add_stock(order_item.menu_item, order_item.quantity)
-            except Exception as e:
-                logger.error(f'Error restoring inventory for {order_item.menu_item.name}: {e!s}')
-                # Continue with cancellation even if inventory restoration fails
-
-        # Mark the order as cancelled
-        order_obj.status = 'cancelled'
-        db_utils.update_model_instance(order_obj, status='cancelled')
-    except Exception as e:
-        logger.error(f'Error cancelling order {order_id}: {e!s}')
-        raise RuntimeError(f'Failed to cancel order: {e!s}')
+@transaction.atomic
+def cancel_order(order_id: int, *, actor: User) -> None:
+    """Allow active staff to cancel and restore stock in one transaction."""
+    if not (actor.is_authenticated and actor.is_active and actor.is_staff):
+        raise PermissionDenied('Only active staff can cancel orders.')
+    order_obj = _get_pending_order_for_update(order_id)
+    items = order_obj.items.select_related('menu_item').order_by('menu_item_id')
+    for order_item in items:
+        inventory_service.add_stock(order_item.menu_item, order_item.quantity)
+    order_obj.status = 'cancelled'
+    order_obj.save(update_fields=['status', 'updated_at'])

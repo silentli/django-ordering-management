@@ -5,6 +5,7 @@ from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
 from django.views import View
@@ -280,17 +281,15 @@ class StaffOrderDetailView(LoginRequiredMixin, View):
         try:
             action = request.POST.get('action')
             if action == 'cancel':
-                order_service.cancel_order(pk)
+                order_service.cancel_order(pk, actor=request.user)
                 messages.success(request, 'Order cancelled successfully.')
             elif action == 'complete':
-                order = order_service.get_order(pk)
-                if order and order.status == 'pending':
-                    order.complete()
-                    messages.success(request, 'Order completed successfully.')
-                else:
-                    messages.error(request, 'Cannot complete a non-pending order.')
+                order_service.complete_order(pk)
+                messages.success(request, 'Order completed successfully.')
             else:
                 messages.error(request, 'Invalid action.')
+        except PermissionDenied:
+            raise
         except Exception as e:
             messages.error(request, f'Error processing order: {e!s}')
 

@@ -45,18 +45,18 @@ class Order(models.Model):
         return self.status == 'pending'
 
     def complete(self):
-        """Mark the order as completed"""
-        if self.status != 'pending':
-            raise ValueError('Only pending orders can be completed')
-        self.status = 'completed'
-        self.save()
+        """Complete through the service, checking the current database state."""
+        from menu_app.services import order_service
 
-    def cancel(self):
-        """Mark the order as cancelled"""
-        if self.status != 'pending':
-            raise ValueError('Only pending orders can be cancelled')
-        self.status = 'cancelled'
-        self.save()
+        order_service.complete_order(self.pk)
+        self.refresh_from_db(fields=['status', 'updated_at'])
+
+    def cancel(self, *, actor):
+        """Cancel through the service so stock is restored atomically."""
+        from menu_app.services import order_service
+
+        order_service.cancel_order(self.pk, actor=actor)
+        self.refresh_from_db(fields=['status', 'updated_at'])
 
     def find_order_item(self, menu_item):
         """
