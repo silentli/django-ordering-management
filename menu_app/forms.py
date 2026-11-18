@@ -11,7 +11,7 @@ class InventoryStockForm(forms.Form):
 class MenuForm(forms.ModelForm):
     class Meta:
         model = MenuItem
-        fields = ['name', 'price', 'category']
+        fields = ['name', 'price', 'category', 'is_active']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control'}),
             'price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),

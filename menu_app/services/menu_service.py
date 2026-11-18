@@ -1,9 +1,12 @@
 """Menu queries and atomic menu management operations."""
 
 import logging
+from decimal import Decimal
 from difflib import get_close_matches
 from typing import Dict, List, Optional, Union
 
+from django.core.exceptions import ValidationError
+from django.core.validators import DecimalValidator
 from django.db import transaction
 from django.db.models import Q, QuerySet
 
@@ -29,7 +32,16 @@ def validate_name(name: str) -> str:
     return name.strip()
 
 
-def validate_price(price: float) -> float:
+def validate_price(price: Decimal) -> Decimal:
+    if isinstance(price, bool) or not isinstance(price, (Decimal, int)):
+        raise ValueError('Price must be a Decimal amount')
+    price = Decimal(price)
+    try:
+        DecimalValidator(max_digits=6, decimal_places=2)(price)
+    except ValidationError:
+        raise ValueError(
+            'Price must be finite, with at most two decimal places and six digits'
+        ) from None
     if price <= 0:
         raise ValueError('Price must be positive')
     return price
@@ -67,11 +79,15 @@ def get_menu_items(
     return result
 
 
-def get_menu(category: Optional[str] = None, available_only: bool = False) -> QuerySet[MenuItem]:
+def get_menu(
+    category: Optional[str] = None, available_only: bool = False, active_only: bool = False
+) -> QuerySet[MenuItem]:
     """Return a filterable menu, optionally limited to items with stock."""
     queryset = MenuItem.objects.all()
     if category:
         queryset = queryset.filter(category=validate_category(category))
+    if active_only or available_only:
+        queryset = queryset.filter(is_active=True)
     if available_only:
         queryset = queryset.filter(inventory__quantity__gt=0)
     return queryset
@@ -100,13 +116,13 @@ def find_menu_item_by_name(
 
 
 @transaction.atomic
-def add_menu_item(name: str, price: float, category: str) -> MenuItem:
+def add_menu_item(name: str, price: Decimal, category: str, *, is_active: bool = True) -> MenuItem:
     name = validate_name(name)
     price = validate_price(price)
     category = validate_category(category)
     if MenuItem.objects.filter(name=name).exists():
         raise ValueError(f"Menu item with name '{name}' already exists")
-    item = MenuItem.objects.create(name=name, price=price, category=category)
+    item = MenuItem.objects.create(name=name, price=price, category=category, is_active=is_active)
     inventory_service.create_inventory(item)
     return item
 
@@ -115,19 +131,27 @@ def add_menu_item(name: str, price: float, category: str) -> MenuItem:
 def modify_menu_item(
     menu_item: MenuItem,
     name: Optional[str] = None,
-    price: Optional[float] = None,
+    price: Optional[Decimal] = None,
     category: Optional[str] = None,
+    is_active: Optional[bool] = None,
 ) -> MenuItem:
     if menu_item is None:
         raise ValueError('Menu item cannot be None')
+    changed_fields = []
     if name is not None:
         name = validate_name(name)
         if MenuItem.objects.filter(name=name).exclude(pk=menu_item.pk).exists():
             raise ValueError(f"Menu item with name '{name}' already exists")
         menu_item.name = name
+        changed_fields.append('name')
     if price is not None:
         menu_item.price = validate_price(price)
+        changed_fields.append('price')
     if category is not None:
         menu_item.category = validate_category(category)
-    menu_item.save()
+        changed_fields.append('category')
+    if is_active is not None:
+        menu_item.is_active = is_active
+        changed_fields.append('is_active')
+    menu_item.save(update_fields=changed_fields)
     return menu_item

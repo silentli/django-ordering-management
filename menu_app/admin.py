@@ -7,8 +7,8 @@ from menu_app.models.order import Order, OrderItem
 
 @admin.register(MenuItem)
 class MenuItemAdmin(admin.ModelAdmin):
-    list_display = ('name', 'category', 'price')
-    list_filter = ('category',)
+    list_display = ('name', 'category', 'price', 'is_active')
+    list_filter = ('category', 'is_active')
     search_fields = ('name',)
 
 
@@ -30,7 +30,11 @@ class InventoryItemAdmin(admin.ModelAdmin):
 class OrderItemInline(admin.TabularInline):
     model = OrderItem
     extra = 1
-    readonly_fields = ('price_at_time_of_order',)
+    readonly_fields = (
+        'name_at_time_of_order',
+        'category_at_time_of_order',
+        'price_at_time_of_order',
+    )
 
 
 @admin.register(Order)

@@ -6,6 +6,7 @@ from django.contrib.auth import login, logout
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
+from django.db.models.deletion import ProtectedError
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
 from django.views import View
@@ -108,12 +109,12 @@ class StaffMenuCreateView(LoginRequiredMixin, CreateView):
     model = MenuItem
     form_class = MenuForm
     template_name = 'menu_app/staff/menu_form.html'
-    success_url = reverse_lazy('staff_menu_list')
+    success_url = reverse_lazy('menu_app:staff_menu_list')
 
-    def get(self, request, *args, **kwargs):
-        if not request.user.is_staff:
-            return redirect('staff_login')
-        return super().get(request, *args, **kwargs)
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated or not request.user.is_staff:
+            return redirect('menu_app:staff_login')
+        return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
         try:
@@ -121,6 +122,7 @@ class StaffMenuCreateView(LoginRequiredMixin, CreateView):
                 name=form.cleaned_data['name'],
                 price=form.cleaned_data['price'],
                 category=form.cleaned_data['category'],
+                is_active=form.cleaned_data['is_active'],
             )
             messages.success(self.request, 'Menu item created successfully.')
             return redirect(self.success_url)
@@ -138,12 +140,12 @@ class StaffMenuUpdateView(LoginRequiredMixin, UpdateView):
     model = MenuItem
     form_class = MenuForm
     template_name = 'menu_app/staff/menu_form.html'
-    success_url = reverse_lazy('staff_menu_list')
+    success_url = reverse_lazy('menu_app:staff_menu_list')
 
-    def get(self, request, *args, **kwargs):
-        if not request.user.is_staff:
-            return redirect('staff_login')
-        return super().get(request, *args, **kwargs)
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated or not request.user.is_staff:
+            return redirect('menu_app:staff_login')
+        return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
         try:
@@ -152,6 +154,7 @@ class StaffMenuUpdateView(LoginRequiredMixin, UpdateView):
                 name=form.cleaned_data['name'],
                 price=form.cleaned_data['price'],
                 category=form.cleaned_data['category'],
+                is_active=form.cleaned_data['is_active'],
             )
             messages.success(self.request, 'Menu item updated successfully.')
             return redirect(self.success_url)
@@ -168,22 +171,21 @@ class StaffMenuDeleteView(LoginRequiredMixin, DeleteView):
 
     model = MenuItem
     template_name = 'menu_app/staff/menu_confirm_delete.html'
-    success_url = reverse_lazy('staff_menu_list')
+    success_url = reverse_lazy('menu_app:staff_menu_list')
 
-    def get(self, request, *args, **kwargs):
-        if not request.user.is_staff:
-            return redirect('staff_login')
-        return super().get(request, *args, **kwargs)
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated or not request.user.is_staff:
+            return redirect('menu_app:staff_login')
+        return super().dispatch(request, *args, **kwargs)
 
-    def delete(self, request, *args, **kwargs):
+    def form_valid(self, form):
         try:
-            menu_item = self.get_object()
-            menu_item.delete()
-            messages.success(request, 'Menu item deleted successfully.')
+            response = super().form_valid(form)
+        except ProtectedError:
+            messages.error(self.request, 'This item has orders. Remove it from the menu instead.')
             return redirect(self.success_url)
-        except Exception as e:
-            messages.error(request, f'Error deleting menu item: {e!s}')
-            return redirect(self.success_url)
+        messages.success(self.request, 'Menu item deleted successfully.')
+        return response
 
 
 # Inventory Management Views

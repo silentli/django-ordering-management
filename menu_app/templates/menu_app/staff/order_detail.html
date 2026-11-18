@@ -71,8 +71,8 @@
                     <tbody>
                         {% for item in order.items.all %}
                         <tr>
-                            <td>{{ item.menu_item.name }}</td>
-                            <td>{{ item.menu_item.get_category_display }}</td>
+                            <td>{{ item.name_at_time_of_order }}</td>
+                            <td>{{ item.get_category_at_time_of_order_display }}</td>
                             <td>${{ item.price_at_time_of_order }}</td>
                             <td>{{ item.quantity }}</td>
                             <td>${{ item.subtotal }}</td>

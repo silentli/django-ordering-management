@@ -42,5 +42,9 @@ def order(menu_item):
 def order_item(order, menu_item):
     """Create a test order item."""
     return order.items.create(
-        menu_item=menu_item, quantity=1, price_at_time_of_order=menu_item.price
+        menu_item=menu_item,
+        quantity=1,
+        price_at_time_of_order=menu_item.price,
+        name_at_time_of_order=menu_item.name,
+        category_at_time_of_order=menu_item.category,
     )

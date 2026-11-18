@@ -54,6 +54,12 @@
                             {% endif %}
                         </div>
                         
+                        <div class="mb-3 form-check">
+                            {{ form.is_active }}
+                            <label for="{{ form.is_active.id_for_label }}" class="form-check-label">Available on menu</label>
+                            {{ form.is_active.errors }}
+                        </div>
+
                         <div class="d-grid gap-2">
                             <button type="submit" class="btn btn-primary">
                                 {% if form.instance.pk %}Update{% else %}Create{% endif %} Menu Item

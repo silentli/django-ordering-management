@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 
-from menu_app.models import Order, OrderItem
+from menu_app.models import MenuItem, Order, OrderItem
 from menu_app.services import inventory_service, menu_service
 
 
@@ -57,15 +57,23 @@ def add_item_to_order(order_id: int, menu_item_id: int, quantity: int = 1) -> No
     if quantity <= 0:
         raise ValueError('Quantity must be positive')
     order = _get_pending_order_for_update(order_id)
-    item = menu_service.get_menu_item(menu_item_id=menu_item_id)
+    # Serialize checkout with menu edits so availability and snapshots agree.
+    item = MenuItem.objects.select_for_update().filter(pk=menu_item_id).first()
     if item is None:
         raise ValueError(f'Menu item {menu_item_id} not found')
+    if not item.is_active:
+        raise ValueError(f'{item.name} is no longer on the menu')
 
     inventory_service.remove_stock(item, quantity)
     line = order.items.filter(menu_item=item).first()
     if line is None:
         OrderItem.objects.create(
-            order=order, menu_item=item, quantity=quantity, price_at_time_of_order=item.price
+            order=order,
+            menu_item=item,
+            quantity=quantity,
+            price_at_time_of_order=item.price,
+            name_at_time_of_order=item.name,
+            category_at_time_of_order=item.category,
         )
     else:
         line.quantity += quantity

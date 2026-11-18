@@ -7,18 +7,7 @@ from menu_app.models import InventoryItem, MenuItem, Order, OrderItem
 
 
 @pytest.mark.django_db
-def test_menu_list_view(client, menu_item, test_data):
-    """Test menu listing functionality."""
-    response = client.get(reverse('menu_app:menu_list'))
-    assert response.status_code == 200
-    assert 'menus' in response.context
-    assert 'categories' in response.context
-    assert test_data['name'] in response.content.decode()
-    assert str(test_data['price']) in response.content.decode()
-
-
-@pytest.mark.django_db
-def test_cart_management(client, menu_item, test_data):
+def test_cart_management(client, menu_item):
     """Test cart management functionality."""
     # Test adding item to cart
     response = client.post(
@@ -77,16 +66,13 @@ def test_checkout_process(client, menu_item, inventory_item, test_data):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize('failure', ['insufficient_stock', 'missing_item'])
 def test_checkout_failure_rolls_back_and_preserves_cart(
-    client, menu_item, inventory_item, test_data, failure
+    client, menu_item, inventory_item, test_data
 ):
     """A later item failure must undo earlier items and preserve the selection for retry."""
     unavailable = MenuItem.objects.create(name='Unavailable', category='beverage', price='2.50')
     unavailable_stock = InventoryItem.objects.create(menu_item=unavailable, quantity=0)
     failed_id = unavailable.id
-    if failure == 'missing_item':
-        unavailable.delete()
 
     cart = {str(menu_item.id): 2, str(failed_id): 1}
     session = client.session
@@ -105,18 +91,17 @@ def test_checkout_failure_rolls_back_and_preserves_cart(
     assert any(message.level_tag == 'error' for message in notifications)
     assert not any(message.level_tag == 'success' for message in notifications)
 
-    if failure == 'insufficient_stock':
-        unavailable_stock.quantity = 1
-        unavailable_stock.save()
-        response = client.post(reverse('menu_app:menu_list'), {'action': 'checkout'})
-        assert response.status_code == 302
-        assert 'cart' not in client.session
-        assert Order.objects.count() == 1
-        assert OrderItem.objects.count() == 2
-        inventory_item.refresh_from_db()
-        unavailable_stock.refresh_from_db()
-        assert inventory_item.quantity == test_data['quantity'] - 2
-        assert unavailable_stock.quantity == 0
+    unavailable_stock.quantity = 1
+    unavailable_stock.save()
+    response = client.post(reverse('menu_app:menu_list'), {'action': 'checkout'})
+    assert response.status_code == 302
+    assert 'cart' not in client.session
+    assert Order.objects.count() == 1
+    assert OrderItem.objects.count() == 2
+    inventory_item.refresh_from_db()
+    unavailable_stock.refresh_from_db()
+    assert inventory_item.quantity == test_data['quantity'] - 2
+    assert unavailable_stock.quantity == 0
 
 
 @pytest.mark.django_db

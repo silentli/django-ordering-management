@@ -3,7 +3,7 @@ from typing import ClassVar, List, Tuple
 
 from django.db import models
 
-from menu_app.models.menu_item import MAX_ITEM_PRICE, MenuItem
+from menu_app.models.menu_item import MAX_ITEM_PRICE, MenuCategory, MenuItem
 
 
 class OrderStatus(models.TextChoices):
@@ -54,13 +54,15 @@ class OrderItem(models.Model):
     # Fields
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
     menu_item = models.ForeignKey(MenuItem, on_delete=models.PROTECT)
+    name_at_time_of_order = models.CharField(max_length=100)
+    category_at_time_of_order = models.CharField(max_length=100, choices=MenuCategory.choices)
     quantity = models.PositiveIntegerField(default=1)
     price_at_time_of_order = models.DecimalField(max_digits=6, decimal_places=2)
 
     class Meta:
         verbose_name = 'Order Item'
         verbose_name_plural = 'Order Items'
-        ordering: ClassVar[List[str]] = ['order', 'menu_item__name']
+        ordering: ClassVar[List[str]] = ['order', 'name_at_time_of_order']
         unique_together: ClassVar[List[str]] = ['order', 'menu_item']
         constraints: ClassVar[List[models.CheckConstraint]] = [
             models.CheckConstraint(
@@ -76,7 +78,7 @@ class OrderItem(models.Model):
         ]
 
     def __str__(self):
-        return f'{self.quantity} x {self.menu_item.name} (${self.subtotal})'
+        return f'{self.quantity} x {self.name_at_time_of_order} (${self.subtotal})'
 
     @property
     def subtotal(self) -> Decimal:

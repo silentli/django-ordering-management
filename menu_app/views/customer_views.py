@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 
 from django.contrib import messages
 from django.shortcuts import redirect
@@ -19,7 +20,7 @@ class MenuListView(ListView):
 
     def get_queryset(self):
         category = self.request.GET.get('category')
-        return menu_service.get_menu(category=category)
+        return menu_service.get_menu(category=category, active_only=True)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -29,7 +30,7 @@ class MenuListView(ListView):
         cart = self.request.session.get('cart', {})
         if cart:
             # Calculate total price and get menu items
-            total_price = 0
+            total_price = Decimal('0.00')
             cart_items = []
             for menu_item_id, quantity in cart.items():
                 menu_item = menu_service.get_menu_item(menu_item_id=menu_item_id)

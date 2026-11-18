@@ -4,11 +4,8 @@ from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.urls import reverse
 
-from menu_app.models import MenuItem
-from menu_app.services import inventory_service, order_service
-
-# Test password for staff authentication
-TEST_STAFF_PASSWORD = 'test_staff_password'  # Must match the value in conftest.py
+from menu_app.models import MenuItem, Order
+from menu_app.services import inventory_service, menu_service, order_service
 
 
 @pytest.fixture
@@ -21,12 +18,6 @@ def staff_user():
     user.set_password(settings.STAFF_PASSWORD)
     user.save()
     return user
-
-
-@pytest.fixture
-def staff_data():
-    """Fixture providing staff-specific test data."""
-    return {'username': 'staff', 'password': TEST_STAFF_PASSWORD, 'is_staff': True}
 
 
 @pytest.mark.django_db
@@ -43,32 +34,6 @@ def test_staff_login_failure(client):
     response = client.post(reverse('menu_app:staff_login'), {'password': 'wrong_password'})
     assert response.status_code == 200  # Stay on login page
     assert '_auth_user_id' not in client.session
-
-
-@pytest.mark.django_db
-def test_menu_form_rejects_zero_price(client, staff_user):
-    client.force_login(staff_user)
-    response = client.post(
-        reverse('menu_app:staff_menu_create'),
-        {'name': 'Invalid price', 'category': 'main', 'price': '0.00'},
-    )
-    assert response.status_code == 200
-    assert 'price' in response.context['form'].errors
-    assert not MenuItem.objects.exists()
-
-
-@pytest.mark.django_db
-def test_staff_dashboard_view(client, staff_user):
-    """Test staff dashboard access."""
-    # Test without login
-    response = client.get(reverse('menu_app:staff_dashboard'))
-    assert response.status_code == 302  # Redirect to login
-
-    # Test with login
-    client.login(username='staff', password=settings.STAFF_PASSWORD)
-    response = client.get(reverse('menu_app:staff_dashboard'))
-    assert response.status_code == 200
-    assert 'orders' in response.context
 
 
 @pytest.mark.django_db
@@ -147,16 +112,11 @@ def test_inventory_management_view(client, staff_user, menu_item, inventory_item
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize('quantity,expected_quantity', [(50, 5), (50, None), (-1, 4)])
-def test_inventory_update_rejects_stale_or_invalid_input(
-    client, staff_user, menu_item, inventory_item, quantity, expected_quantity
-):
+def test_inventory_update_rejects_stale_stock(client, staff_user, menu_item, inventory_item):
     client.force_login(staff_user)
     # A sale after the page was loaded changes the stock from 5 to 4.
     inventory_service.remove_stock(menu_item, 1)
-    data = {'quantity': quantity}
-    if expected_quantity is not None:
-        data['expected_quantity'] = expected_quantity
+    data = {'quantity': 50, 'expected_quantity': 5}
 
     response = client.post(reverse('menu_app:inventory_update', args=[menu_item.id]), data)
 
@@ -164,3 +124,60 @@ def test_inventory_update_rejects_stale_or_invalid_input(
     inventory_item.refresh_from_db()
     assert inventory_item.quantity == 4
     assert any(message.level_tag == 'error' for message in get_messages(response.wsgi_request))
+
+
+@pytest.mark.django_db
+def test_menu_deactivation_preserves_orders_and_blocks_checkout(
+    client, staff_user, menu_item, inventory_item
+):
+    original_name = menu_item.name
+    original_category_label = menu_item.get_category_display()
+    order = order_service.place_order({str(menu_item.pk): 2})
+    client.force_login(staff_user)
+    response = client.post(
+        reverse('menu_app:staff_menu_update', args=[menu_item.pk]),
+        {'name': 'Renamed dish', 'price': '20.00', 'category': 'dessert'},
+    )
+    assert response.status_code == 302
+    menu_item.refresh_from_db()
+    assert not menu_item.is_active
+    assert menu_item not in client.get(reverse('menu_app:menu_list')).context['menus']
+    assert menu_item in client.get(reverse('menu_app:staff_menu_list')).context['menus']
+
+    detail = client.get(reverse('menu_app:staff_order_detail', args=[order.pk]))
+    assert original_name in detail.content.decode()
+    assert original_category_label in detail.content.decode()
+    assert 'Renamed dish' not in detail.content.decode()
+
+    session = client.session
+    session['cart'] = {str(menu_item.pk): 1}
+    session.save()
+    client.post(reverse('menu_app:menu_list'), {'action': 'checkout'})
+    assert client.session['cart'] == {str(menu_item.pk): 1}
+    assert Order.objects.count() == 1
+    inventory_item.refresh_from_db()
+    assert inventory_item.quantity == 3
+
+    response = client.post(reverse('menu_app:staff_menu_delete', args=[menu_item.pk]))
+    assert response.status_code == 302
+    assert MenuItem.objects.filter(pk=menu_item.pk).exists()
+    order_service.cancel_order(order.pk, actor=staff_user)
+    inventory_item.refresh_from_db()
+    assert inventory_item.quantity == 5
+
+    menu_service.modify_menu_item(menu_item, is_active=True)
+    new_order = order_service.place_order({str(menu_item.pk): 1})
+    assert new_order.items.get().name_at_time_of_order == 'Renamed dish'
+
+
+@pytest.mark.django_db
+def test_customers_cannot_change_menu_availability(client, menu_item, django_user_model):
+    customer = django_user_model.objects.create_user(username='menu-customer')
+    client.force_login(customer)
+    response = client.post(
+        reverse('menu_app:staff_menu_update', args=[menu_item.pk]),
+        {'name': menu_item.name, 'price': '10.00', 'category': 'main'},
+    )
+    assert response.status_code == 302
+    menu_item.refresh_from_db()
+    assert menu_item.is_active

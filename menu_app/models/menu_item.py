@@ -28,6 +28,7 @@ class MenuItem(models.Model):
     price = models.DecimalField(
         max_digits=6, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))]
     )
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         ordering: ClassVar[List[str]] = ['category', 'name']
@@ -48,4 +49,4 @@ class MenuItem(models.Model):
     @property
     def is_available(self):
         """Check if the menu item is available (has inventory and not sold out)."""
-        return hasattr(self, 'inventory') and not self.inventory.is_sold_out
+        return self.is_active and hasattr(self, 'inventory') and not self.inventory.is_sold_out
