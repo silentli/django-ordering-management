@@ -34,6 +34,18 @@ def test_staff_login_failure(client):
     response = client.post(reverse('menu_app:staff_login'), {'password': 'wrong_password'})
     assert response.status_code == 200  # Stay on login page
     assert '_auth_user_id' not in client.session
+    assert not User.objects.filter(username='staff').exists()
+
+
+@pytest.mark.django_db
+def test_staff_login_rejects_missing_password_configuration(client, settings):
+    settings.STAFF_PASSWORD = None
+
+    response = client.post(reverse('menu_app:staff_login'), {})
+
+    assert response.status_code == 200
+    assert '_auth_user_id' not in client.session
+    assert not User.objects.filter(username='staff').exists()
 
 
 @pytest.mark.django_db

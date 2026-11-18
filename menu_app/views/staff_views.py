@@ -9,6 +9,7 @@ from django.core.exceptions import PermissionDenied
 from django.db.models.deletion import ProtectedError
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
+from django.utils.crypto import constant_time_compare
 from django.views import View
 from django.views.generic import (
     CreateView,
@@ -39,6 +40,16 @@ class StaffLoginView(View):
 
     def post(self, request):
         password = request.POST.get('password')
+        configured_password = getattr(settings, 'STAFF_PASSWORD', None)
+
+        if (
+            not configured_password
+            or not configured_password.strip()
+            or not password
+            or not constant_time_compare(password, configured_password)
+        ):
+            messages.error(request, 'Invalid password')
+            return render(request, self.template_name)
 
         # Get or create staff user
         staff_user, created = User.objects.get_or_create(
@@ -46,19 +57,13 @@ class StaffLoginView(View):
         )
 
         # Always ensure the staff user has the correct password
-        if created or not staff_user.check_password(settings.STAFF_PASSWORD):
-            staff_user.set_password(settings.STAFF_PASSWORD)
+        if created or not staff_user.check_password(configured_password):
+            staff_user.set_password(configured_password)
             staff_user.save()
 
-        # Check if the provided password matches
-        if password == settings.STAFF_PASSWORD:
-            # Log the user in
-            login(request, staff_user)
-            messages.success(request, 'Staff login successful!')
-            return redirect('menu_app:staff_dashboard')
-
-        messages.error(request, 'Invalid password')
-        return render(request, self.template_name)
+        login(request, staff_user)
+        messages.success(request, 'Staff login successful!')
+        return redirect('menu_app:staff_dashboard')
 
 
 class StaffDashboardView(LoginRequiredMixin, View):

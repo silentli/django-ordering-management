@@ -2,8 +2,21 @@
 
 set -eu
 
-: "${POSTGRES_HOST:?POSTGRES_HOST must be set}"
-: "${POSTGRES_PORT:?POSTGRES_PORT must be set}"
+# Validate Web runtime configuration without exposing secret values.
+python - <<'PY'
+import os
+import sys
+
+required = (
+    'DJANGO_SECRET_KEY', 'ALLOWED_HOSTS', 'STAFF_PASSWORD',
+    'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD',
+    'POSTGRES_HOST', 'POSTGRES_PORT',
+)
+missing = [name for name in required if not os.environ.get(name, '').strip()]
+if missing:
+    sys.exit('Missing or empty required environment variables: ' + ', '.join(missing))
+PY
+
 POSTGRES_WAIT_TIMEOUT="${POSTGRES_WAIT_TIMEOUT:-60}"
 
 case "$POSTGRES_WAIT_TIMEOUT" in
