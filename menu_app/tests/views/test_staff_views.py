@@ -1,6 +1,7 @@
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.contrib.messages import get_messages
 from django.urls import reverse
 
 from menu_app.models.order import Order
@@ -102,7 +103,7 @@ def test_inventory_management_view(client, staff_user, menu_item, inventory_item
 
     response = client.post(
         reverse('menu_app:inventory_update', args=[menu_item.id]),
-        {'quantity': target_quantity},
+        {'quantity': target_quantity, 'expected_quantity': inventory_item.quantity},
     )
     assert response.status_code == 302  # Redirect after update
 
@@ -110,3 +111,23 @@ def test_inventory_management_view(client, staff_user, menu_item, inventory_item
     updated_inventory = inventory_service.get_inventory(menu_item)
     assert updated_inventory is not None
     assert updated_inventory.quantity == target_quantity
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('quantity,expected_quantity', [(50, 5), (50, None), (-1, 4)])
+def test_inventory_update_rejects_stale_or_invalid_input(
+    client, staff_user, menu_item, inventory_item, quantity, expected_quantity
+):
+    client.force_login(staff_user)
+    # A sale after the page was loaded changes the stock from 5 to 4.
+    inventory_service.remove_stock(menu_item, 1)
+    data = {'quantity': quantity}
+    if expected_quantity is not None:
+        data['expected_quantity'] = expected_quantity
+
+    response = client.post(reverse('menu_app:inventory_update', args=[menu_item.id]), data)
+
+    assert response.status_code == 302
+    inventory_item.refresh_from_db()
+    assert inventory_item.quantity == 4
+    assert any(message.level_tag == 'error' for message in get_messages(response.wsgi_request))

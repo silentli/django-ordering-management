@@ -16,7 +16,7 @@ from django.views.generic import (
 )
 from django.views.generic.base import RedirectView
 
-from menu_app.forms import MenuForm
+from menu_app.forms import InventoryStockForm, MenuForm
 from menu_app.models.inventory import InventoryItem
 from menu_app.models.menu_item import MenuItem
 from menu_app.models.order import Order
@@ -221,15 +221,13 @@ class InventoryUpdateView(LoginRequiredMixin, View):
             return redirect('menu_app:staff_login')
 
         try:
+            form = InventoryStockForm(request.POST)
+            if not form.is_valid():
+                raise ValueError(
+                    'Enter a non-negative stock quantity and refresh the page to retry.'
+                )
             menu_item = MenuItem.objects.get(id=menu_item_id)
-            quantity = int(request.POST.get('quantity', 0))
-
-            # Calculate quantity change from current inventory
-            current_inventory = inventory_service.get_inventory(menu_item)
-            current_quantity = current_inventory.quantity if current_inventory else 0
-            quantity_change = quantity - current_quantity
-
-            inventory_service.update_inventory(menu_item, quantity_change)
+            inventory_service.set_stock(menu_item, **form.cleaned_data)
             messages.success(request, f'Inventory updated for {menu_item.name}')
         except MenuItem.DoesNotExist:
             messages.error(request, 'Menu item not found')

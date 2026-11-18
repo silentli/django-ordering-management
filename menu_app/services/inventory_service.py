@@ -52,14 +52,10 @@ def create_inventory(
         # Create inventory item with validation
         inventory_item = inventory.InventoryItem(
             menu_item=menu_item,
-            quantity=0,  # Start with 0 and use add_stock for proper validation
+            quantity=initial_quantity,
             low_stock_threshold=low_stock_threshold,
         )
         inventory_item.save()
-
-        # Use the model's add_stock method if initial quantity is provided
-        if initial_quantity > 0:
-            inventory_item.add_stock(initial_quantity)
 
         return inventory_item
     except Exception as e:
@@ -152,20 +148,26 @@ def add_stock(menu_item: menu_item.MenuItem, quantity: int) -> None:
 
     Raises:
         ValueError: If quantity is not positive
-        RuntimeError: If there are issues adding stock
     """
     if quantity <= 0:
         raise ValueError('Quantity must be positive')
 
-    try:
-        inventory_item = get_inventory(menu_item)
-        if not inventory_item:
-            inventory_item = create_inventory(menu_item, initial_quantity=0)
-        inventory_item.quantity += quantity
-        db_utils.update_model_instance(inventory_item, quantity=inventory_item.quantity)
-    except Exception as e:
-        logger.error(f'Error adding stock to {menu_item.name}: {e!s}')
-        raise RuntimeError(f'Failed to add stock: {e!s}')
+    inventory_item, _ = inventory.InventoryItem.objects.get_or_create(menu_item=menu_item)
+    inventory.InventoryItem.objects.filter(pk=inventory_item.pk).update(
+        quantity=F('quantity') + quantity
+    )
+
+
+def set_stock(menu_item: menu_item.MenuItem, quantity: int, expected_quantity: int) -> None:
+    """Set an absolute quantity only if stock still matches the displayed value."""
+    if quantity < 0 or expected_quantity < 0:
+        raise ValueError('Quantity cannot be negative')
+
+    updated = inventory.InventoryItem.objects.filter(
+        menu_item=menu_item, quantity=expected_quantity
+    ).update(quantity=quantity)
+    if not updated:
+        raise ValueError('Stock has changed. Refresh the page and try again.')
 
 
 @transaction.atomic

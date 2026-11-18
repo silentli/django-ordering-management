@@ -16,6 +16,15 @@ class MenuItemAdmin(admin.ModelAdmin):
 class InventoryItemAdmin(admin.ModelAdmin):
     list_display = ('menu_item', 'quantity')
     search_fields = ('menu_item__name',)
+    readonly_fields = ('quantity',)
+
+    def save_model(self, request, obj, form, change):
+        if change:
+            # Stock is managed through the staff inventory page. Editing other
+            # fields must not overwrite sales or restocking that happened meanwhile.
+            obj.save(update_fields=form.changed_data)
+        else:
+            super().save_model(request, obj, form, change)
 
 
 class OrderItemInline(admin.TabularInline):

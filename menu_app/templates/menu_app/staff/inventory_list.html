@@ -39,11 +39,12 @@
                     <td>
                         <form method="post" action="{% url 'menu_app:inventory_update' item.menu_item.id %}" class="d-inline">
                             {% csrf_token %}
+                            <input type="hidden" name="expected_quantity" value="{{ item.quantity }}">
                             <div class="input-group">
-                                <input type="number" name="quantity_change" class="form-control" style="width: 100px;" 
-                                       placeholder="Change" required>
+                                <input type="number" name="quantity" class="form-control" style="width: 100px;"
+                                       value="{{ item.quantity }}" min="0" aria-label="New stock quantity" required>
                                 <button type="submit" class="btn btn-outline-primary">
-                                    Update
+                                    Set stock
                                 </button>
                             </div>
                         </form>
@@ -58,4 +59,4 @@
         </table>
     </div>
 </div>
-{% endblock %} 
+{% endblock %}

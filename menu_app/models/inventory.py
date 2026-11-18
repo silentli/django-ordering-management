@@ -47,16 +47,14 @@ class InventoryItem(models.Model):
 
     def add_stock(self, amount: int) -> None:
         """Add stock to inventory."""
-        if amount <= 0:
-            raise ValueError('Amount must be positive')
-        self.quantity += amount
-        self.save()
+        from menu_app.services import inventory_service
+
+        inventory_service.add_stock(self.menu_item, amount)
+        self.refresh_from_db(fields=['quantity'])
 
     def remove_stock(self, amount: int) -> None:
         """Remove stock from inventory."""
-        if amount <= 0:
-            raise ValueError('Amount must be positive')
-        if amount > self.quantity:
-            raise ValueError('Insufficient stock')
-        self.quantity -= amount
-        self.save()
+        from menu_app.services import inventory_service
+
+        inventory_service.remove_stock(self.menu_item, amount)
+        self.refresh_from_db(fields=['quantity'])
