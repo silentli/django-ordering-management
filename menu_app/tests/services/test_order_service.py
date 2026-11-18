@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 from threading import Barrier, Event
 
 import pytest
@@ -6,7 +7,7 @@ from django.core.exceptions import PermissionDenied
 from django.db import close_old_connections, connection, connections, transaction
 
 from menu_app.models import InventoryItem, MenuItem, Order, OrderItem
-from menu_app.services import inventory_service, menu_utils, order_service
+from menu_app.services import inventory_service, menu_service, menu_utils, order_service
 
 
 @pytest.fixture
@@ -193,3 +194,36 @@ def test_cancellation_rejects_customers(placed_order, inventory_item, django_use
     inventory_item.refresh_from_db()
     assert placed_order.status == 'pending'
     assert inventory_item.quantity == 3
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('with_items', [True, False])
+def test_order_read_interfaces_preserve_quantities_and_prices(
+    menu_item, inventory_item, with_items
+):
+    quantity = 2 if with_items else 0
+    original_price = menu_item.price
+    placed_order = (
+        order_service.place_order({str(menu_item.pk): quantity})
+        if with_items
+        else order_service.create_order()
+    )
+    menu_service.modify_menu_item(menu_item, price=Decimal('99.00'))
+    if with_items:
+        order_service.complete_order(placed_order.pk)
+
+    lines = order_service.get_order_items(placed_order.pk)
+    assert isinstance(lines, list)
+    assert sum(line.quantity for line in lines) == quantity
+    if with_items:
+        assert isinstance(lines[0], OrderItem)
+        assert lines[0].price_at_time_of_order == original_price
+
+    total = order_service.get_order_total(placed_order.pk)
+    assert isinstance(total, Decimal)
+    assert total == original_price * quantity
+    assert order_service.get_order(placed_order.pk).total_items == quantity
+    assert order_service.get_item_quantity(placed_order.pk, menu_item.pk) == quantity
+
+    other_item = MenuItem.objects.create(name='Not ordered', category='beverage', price='1.00')
+    assert order_service.get_item_quantity(placed_order.pk, other_item.pk) == 0

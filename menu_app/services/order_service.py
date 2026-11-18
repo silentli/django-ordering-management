@@ -4,13 +4,14 @@ This module manages orders and their items.
 """
 
 import logging
+from decimal import Decimal
 from typing import List, Mapping, Optional
 
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 
-from menu_app.models import menu_item, order
+from menu_app.models import order
 from menu_app.services import db_utils, inventory_service, menu_utils
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ def _get_base_order_queryset():
     return db_utils.get_model_queryset(order.Order).prefetch_related('items', 'items__menu_item')
 
 
-def get_order(order_id: str) -> Optional[order.Order]:
+def get_order(order_id: int) -> Optional[order.Order]:
     """
     Get an order by ID
 
@@ -85,7 +86,7 @@ def place_order(cart: Mapping[str, int]) -> order.Order:
 
 
 @transaction.atomic
-def add_item_to_order(order_id: str, menu_item_id: int, quantity: int = 1) -> None:
+def add_item_to_order(order_id: int, menu_item_id: int, quantity: int = 1) -> None:
     """
     Add an item to an order and reduce inventory
 
@@ -137,7 +138,7 @@ def add_item_to_order(order_id: str, menu_item_id: int, quantity: int = 1) -> No
 
 
 @transaction.atomic
-def remove_item_from_order(order_id: str, menu_item_id: int, quantity: int = 1) -> None:
+def remove_item_from_order(order_id: int, menu_item_id: int, quantity: int = 1) -> None:
     """
     Remove an item from an order and restore inventory
 
@@ -178,7 +179,7 @@ def remove_item_from_order(order_id: str, menu_item_id: int, quantity: int = 1) 
         raise RuntimeError(f'Failed to remove item from order: {e!s}')
 
 
-def get_order_total(order_id: str) -> float:
+def get_order_total(order_id: int) -> Decimal:
     """
     Get the total price of an order
 
@@ -197,15 +198,15 @@ def get_order_total(order_id: str) -> float:
     return order_obj.total_price
 
 
-def get_order_items(order_id: str) -> List[menu_item.MenuItem]:
+def get_order_items(order_id: int) -> List[order.OrderItem]:
     """
-    Get all menu items in an order
+    Get order lines, including their quantities and prices at purchase time.
 
     Args:
         order_id: The ID of the order
 
     Returns:
-        List of menu items in the order
+        List of OrderItem objects; an empty order returns an empty list.
 
     Raises:
         ValueError: If order_id is invalid or order not found
@@ -213,10 +214,10 @@ def get_order_items(order_id: str) -> List[menu_item.MenuItem]:
     order_obj = get_order(order_id)
     if not order_obj:
         raise ValueError(f'Order {order_id} not found')
-    return order_obj.menu_items
+    return list(order_obj.items.all())
 
 
-def get_item_quantity(order_id: str, menu_item_id: int) -> int:
+def get_item_quantity(order_id: int, menu_item_id: int) -> int:
     """
     Get the quantity of a specific menu item in an order
 
@@ -225,7 +226,7 @@ def get_item_quantity(order_id: str, menu_item_id: int) -> int:
         menu_item_id: The ID of the menu item
 
     Returns:
-        The quantity of the menu item in the order
+        The quantity, or zero if this menu item is not part of the order.
 
     Raises:
         ValueError: If parameters are invalid or order/menu item not found
@@ -238,7 +239,10 @@ def get_item_quantity(order_id: str, menu_item_id: int) -> int:
     if not menu_item_obj:
         raise ValueError(f'Menu item {menu_item_id} not found')
 
-    return order_obj.get_item_quantity(menu_item_obj)
+    return next(
+        (item.quantity for item in order_obj.items.all() if item.menu_item_id == menu_item_obj.pk),
+        0,
+    )
 
 
 @transaction.atomic

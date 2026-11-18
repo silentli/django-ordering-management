@@ -54,14 +54,18 @@ def with_transaction(func):
     return wrapper
 
 
-def get_menu_item(**kwargs) -> Optional[menu_item.MenuItem]:
+def get_menu_item(
+    menu_item_id: Optional[int] = None, name: Optional[str] = None
+) -> Optional[menu_item.MenuItem]:
     """
     Get a menu item by ID or name.
     """
-    return menu_utils.get_menu_item(**kwargs)
+    return menu_utils.get_menu_item(menu_item_id=menu_item_id, name=name)
 
 
-def get_menu_items(**kwargs) -> Dict[Union[int, str], menu_item.MenuItem]:
+def get_menu_items(
+    *, menu_item_ids: Optional[List[int]] = None, names: Optional[List[str]] = None
+) -> Dict[Union[int, str], menu_item.MenuItem]:
     """
     Get multiple menu items by IDs or names with validation.
 
@@ -72,26 +76,23 @@ def get_menu_items(**kwargs) -> Dict[Union[int, str], menu_item.MenuItem]:
     Returns:
         Dictionary mapping IDs/names to MenuItems
     """
-    if not kwargs:
-        raise ValueError('Must provide either menu_item_ids or names')
+    if (menu_item_ids is None) == (names is None):
+        raise ValueError('Provide exactly one of menu_item_ids or names')
 
-    if 'menu_item_ids' in kwargs:
-        ids = kwargs['menu_item_ids']
-        if not ids:
+    if menu_item_ids is not None:
+        if not menu_item_ids:
             raise ValueError('Menu item IDs list cannot be empty')
-        result = menu_utils.get_menu_items_bulk(menu_item_ids=ids)
-        if len(result) != len(ids):
-            missing = set(ids) - set(result.keys())
-            logger.warning(f'Some menu items not found: {missing}')
+        requested = set(menu_item_ids)
+        result = menu_utils.get_menu_items_bulk(menu_item_ids=menu_item_ids)
     else:
-        names = kwargs['names']
         if not names:
             raise ValueError('Menu item names list cannot be empty')
-        standardized_names = list(map(str.strip, names))
-        result = menu_utils.get_menu_items_bulk(names=standardized_names)
-        if len(result) != len(standardized_names):
-            missing = set(standardized_names) - set(result.keys())
-            logger.warning(f'Some menu items not found: {missing}')
+        requested = {validate_name(name) for name in names}
+        result = menu_utils.get_menu_items_bulk(names=list(requested))
+
+    missing = requested - result.keys()
+    if missing:
+        logger.warning(f'Some menu items not found: {missing}')
     return result
 
 
@@ -114,7 +115,7 @@ def get_menu(
             standardized_category = validate_category(category)
             queryset = queryset.filter(category=standardized_category)
         if available_only:
-            queryset = queryset.filter(is_available=True)
+            queryset = queryset.filter(inventory__quantity__gt=0)
         return queryset
     except Exception as e:
         logger.error(f'Error getting menu: {e!s}')

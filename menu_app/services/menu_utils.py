@@ -25,7 +25,7 @@ def get_menu_item(
 
 def get_menu_items_bulk(
     menu_item_ids: Union[List[int], None] = None, names: Union[List[str], None] = None
-) -> Dict:
+) -> Dict[Union[int, str], menu_item.MenuItem]:
     """
     Get multiple menu items by IDs or names in one query.
     Exactly one of menu_item_ids or names must be provided.
@@ -119,43 +119,3 @@ def check_item_availability(menu_item: menu_item.MenuItem, quantity: int = 1) ->
     except inventory.InventoryItem.DoesNotExist:
         logger.warning(f'No inventory found for menu item {menu_item.name}')
         return False
-
-
-def create_menu_item(
-    name: str,
-    description: str,
-    price: float,
-    category: str,
-    image_url: Union[str, None] = None,
-) -> menu_item.MenuItem:
-    """
-    Create a new menu item
-    """
-    return db_utils.create_model_instance(
-        menu_item.MenuItem,
-        name=name,
-        description=description,
-        price=price,
-        category=category,
-        image_url=image_url,
-    )
-
-
-def update_menu_item(
-    menu_item: menu_item.MenuItem,
-    name: Union[str, None] = None,
-    price: Union[float, None] = None,
-    category: Union[str, None] = None,
-) -> menu_item.MenuItem:
-    """
-    Update an existing menu item
-    """
-    update_data = {}
-    if name is not None:
-        update_data['name'] = name
-    if price is not None:
-        update_data['price'] = price
-    if category is not None:
-        update_data['category'] = category
-
-    return db_utils.update_model_instance(menu_item, **update_data)

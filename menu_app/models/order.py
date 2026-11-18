@@ -87,9 +87,14 @@ class Order(models.Model):
             return None
 
     @property
+    def total_items(self) -> int:
+        """Total quantity across all order lines."""
+        return sum(item.quantity for item in self.items.all())
+
+    @property
     def total_price(self) -> Decimal:
         """Calculate the total price of the order."""
-        return sum(item.subtotal for item in self.items.all())
+        return sum((item.subtotal for item in self.items.all()), Decimal('0.00'))
 
 
 class OrderItem(models.Model):
