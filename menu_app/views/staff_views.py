@@ -71,9 +71,7 @@ class StaffDashboardView(LoginRequiredMixin, View):
         if not request.user.is_staff:
             return redirect('menu_app:staff_login')
 
-        # Get all orders for the dashboard
-        orders = order_service.get_all_orders()
-        return render(request, self.template_name, {'orders': orders})
+        return render(request, self.template_name)
 
 
 # Staff views
@@ -218,8 +216,7 @@ class LowStockListView(LoginRequiredMixin, ListView):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
-        threshold = int(self.request.GET.get('threshold', 10))
-        return inventory_service.get_low_stock_items(threshold)
+        return inventory_service.get_low_stock_items()
 
 
 class InventoryUpdateView(LoginRequiredMixin, View):

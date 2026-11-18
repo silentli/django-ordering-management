@@ -43,10 +43,9 @@ def get_inventory_by_menu_item_name(name: str) -> Optional[InventoryItem]:
     return _get_base_inventory_queryset().filter(menu_item__name=name.strip()).first()
 
 
-def get_low_stock_items(threshold: int = 10) -> List[InventoryItem]:
-    if threshold <= 0:
-        raise ValueError('Threshold must be positive')
-    return list(_get_base_inventory_queryset().filter(quantity__lt=threshold))
+def get_low_stock_items() -> List[InventoryItem]:
+    """Use each item's configured threshold, including the threshold itself."""
+    return list(_get_base_inventory_queryset().filter(quantity__lte=F('low_stock_threshold')))
 
 
 @transaction.atomic

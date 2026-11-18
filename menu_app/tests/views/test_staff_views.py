@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.urls import reverse
 
-from menu_app.models import MenuItem, Order
+from menu_app.models import InventoryItem, MenuItem, Order
 from menu_app.services import inventory_service, menu_service, order_service
 
 
@@ -181,3 +181,30 @@ def test_customers_cannot_change_menu_availability(client, menu_item, django_use
     assert response.status_code == 302
     menu_item.refresh_from_db()
     assert menu_item.is_active
+
+
+@pytest.mark.django_db
+def test_low_stock_page_uses_each_items_threshold(client, staff_user):
+    client.force_login(staff_user)
+    cases = [(2, 3), (5, 5), (7, 6), (12, 15), (0, 1)]
+    stocks = []
+    for index, (quantity, threshold) in enumerate(cases):
+        item = MenuItem.objects.create(name=f'Dish {index}', category='main', price='1.00')
+        stocks.append(
+            InventoryItem.objects.create(
+                menu_item=item, quantity=quantity, low_stock_threshold=threshold
+            )
+        )
+
+    response = client.get(reverse('menu_app:low_stock_list'))
+
+    assert response.status_code == 200
+    assert {stock.pk for stock in response.context['low_stock_items']} == {
+        stock.pk for stock in stocks if stock.is_low_stock
+    }
+    assert {stock.pk for stock in response.context['low_stock_items']} == {
+        stocks[0].pk,
+        stocks[1].pk,
+        stocks[3].pk,
+        stocks[4].pk,
+    }

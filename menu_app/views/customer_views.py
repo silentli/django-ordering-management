@@ -32,8 +32,11 @@ class MenuListView(ListView):
             # Calculate total price and get menu items
             total_price = Decimal('0.00')
             cart_items = []
+            menu_items = menu_service.get_menu_items(
+                menu_item_ids=[int(menu_item_id) for menu_item_id in cart]
+            )
             for menu_item_id, quantity in cart.items():
-                menu_item = menu_service.get_menu_item(menu_item_id=menu_item_id)
+                menu_item = menu_items.get(int(menu_item_id))
                 if menu_item:
                     item_total = menu_item.price * quantity
                     total_price += item_total

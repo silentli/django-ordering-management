@@ -1,6 +1,9 @@
+from decimal import Decimal
+
 import pytest
 from django.contrib.messages import get_messages
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from menu_app.models import InventoryItem, MenuItem, Order, OrderItem
@@ -137,3 +140,23 @@ def test_unexpected_checkout_failure_rolls_back_and_keeps_diagnostics_private(
     assert not OrderItem.objects.exists()
     inventory_item.refresh_from_db()
     assert inventory_item.quantity == test_data['quantity']
+
+
+@pytest.mark.django_db
+def test_cart_reads_items_in_bulk_and_preserves_totals(client, menu_item):
+    other = MenuItem.objects.create(name='Drink', category='beverage', price=Decimal('2.50'))
+    session = client.session
+    session['cart'] = {str(menu_item.pk): 2, str(other.pk): 1}
+    session.save()
+
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get(reverse('menu_app:menu_list'))
+
+    assert response.status_code == 200
+    assert [
+        (line['menu_item'].pk, line['quantity']) for line in response.context['cart_items']
+    ] == [(menu_item.pk, 2), (other.pk, 1)]
+    assert response.context['cart_total'] == menu_item.price * 2 + other.price
+    # At most one menu listing query and one bulk cart query, regardless of cart size.
+    menu_reads = [query for query in queries if 'FROM "menu_app_menuitem"' in query['sql']]
+    assert len(menu_reads) <= 2
