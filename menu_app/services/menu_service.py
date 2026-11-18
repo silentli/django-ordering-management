@@ -1,214 +1,133 @@
+"""Menu queries and atomic menu management operations."""
+
 import logging
-from functools import wraps
+from difflib import get_close_matches
 from typing import Dict, List, Optional, Union
 
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 
-from menu_app.models import menu_item
-from menu_app.services import db_utils, menu_utils
+from menu_app.models import MenuItem
+from menu_app.services import inventory_service
 
 logger = logging.getLogger(__name__)
 
 
 def validate_category(category: str) -> str:
-    """Validate and standardize category name"""
     if not category or not category.strip():
         raise ValueError('Category cannot be empty')
-
-    standardized_category = category.strip().lower()
-    valid_categories = [choice[0] for choice in menu_item.MenuItem.CATEGORY_CHOICES]
-    if standardized_category not in valid_categories:
+    category = category.strip().lower()
+    valid_categories = [value for value, _ in MenuItem.CATEGORY_CHOICES]
+    if category not in valid_categories:
         raise ValueError(f'Invalid category. Must be one of: {", ".join(valid_categories)}')
-    return standardized_category
+    return category
 
 
 def validate_name(name: str) -> str:
-    """Validate and standardize menu item name"""
     if not name or not name.strip():
         raise ValueError('Name cannot be empty')
     return name.strip()
 
 
 def validate_price(price: float) -> float:
-    """Validate price"""
     if price <= 0:
         raise ValueError('Price must be positive')
     return price
 
 
-def with_transaction(func):
-    """Decorator to handle transactions and logging"""
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            with transaction.atomic():
-                result = func(*args, **kwargs)
-                logger.info(f'Successfully executed {func.__name__}')
-                return result
-        except Exception as e:
-            logger.error(f'Error in {func.__name__}: {e!s}')
-            raise
-
-    return wrapper
-
-
 def get_menu_item(
     menu_item_id: Optional[int] = None, name: Optional[str] = None
-) -> Optional[menu_item.MenuItem]:
-    """
-    Get a menu item by ID or name.
-    """
-    return menu_utils.get_menu_item(menu_item_id=menu_item_id, name=name)
+) -> Optional[MenuItem]:
+    """Look up exactly one ID or name; return None when it does not exist."""
+    if (menu_item_id is None) == (name is None):
+        raise ValueError('Provide exactly one of menu_item_id or name')
+    filters = {'pk': menu_item_id} if menu_item_id is not None else {'name': name}
+    return MenuItem.objects.filter(**filters).first()
 
 
 def get_menu_items(
     *, menu_item_ids: Optional[List[int]] = None, names: Optional[List[str]] = None
-) -> Dict[Union[int, str], menu_item.MenuItem]:
-    """
-    Get multiple menu items by IDs or names with validation.
-
-    Args:
-        menu_item_ids: List of menu item IDs
-        names: List of menu item names
-
-    Returns:
-        Dictionary mapping IDs/names to MenuItems
-    """
+) -> Dict[Union[int, str], MenuItem]:
+    """Return existing items keyed by ID or normalized name."""
     if (menu_item_ids is None) == (names is None):
         raise ValueError('Provide exactly one of menu_item_ids or names')
-
     if menu_item_ids is not None:
         if not menu_item_ids:
             raise ValueError('Menu item IDs list cannot be empty')
         requested = set(menu_item_ids)
-        result = menu_utils.get_menu_items_bulk(menu_item_ids=menu_item_ids)
+        result = MenuItem.objects.in_bulk(menu_item_ids)
     else:
         if not names:
             raise ValueError('Menu item names list cannot be empty')
         requested = {validate_name(name) for name in names}
-        result = menu_utils.get_menu_items_bulk(names=list(requested))
-
+        result = MenuItem.objects.filter(name__in=requested).in_bulk(field_name='name')
     missing = requested - result.keys()
     if missing:
         logger.warning(f'Some menu items not found: {missing}')
     return result
 
 
-def get_menu(
-    category: Optional[str] = None, available_only: bool = False
-) -> QuerySet[menu_item.MenuItem]:
-    """
-    Get menu items with optional filtering.
-
-    Args:
-        category: Optional category to filter by
-        available_only: Whether to only return available items
-
-    Returns:
-        QuerySet[MenuItem]: A queryset of menu items
-    """
-    try:
-        queryset = db_utils.get_model_queryset(menu_item.MenuItem)
-        if category:
-            standardized_category = validate_category(category)
-            queryset = queryset.filter(category=standardized_category)
-        if available_only:
-            queryset = queryset.filter(inventory__quantity__gt=0)
-        return queryset
-    except Exception as e:
-        logger.error(f'Error getting menu: {e!s}')
-        raise
+def get_menu(category: Optional[str] = None, available_only: bool = False) -> QuerySet[MenuItem]:
+    """Return a filterable menu, optionally limited to items with stock."""
+    queryset = MenuItem.objects.all()
+    if category:
+        queryset = queryset.filter(category=validate_category(category))
+    if available_only:
+        queryset = queryset.filter(inventory__quantity__gt=0)
+    return queryset
 
 
-def search_menu(query: str) -> List[menu_item.MenuItem]:
-    """
-    Search the menu by name or category
-    """
+def search_menu(query: str) -> List[MenuItem]:
     if not query or not query.strip():
         raise ValueError('Search query cannot be empty')
-    return menu_utils.search_menu_items(query.strip())
+    query = query.strip()
+    return list(MenuItem.objects.filter(Q(name__icontains=query) | Q(category__icontains=query)))
 
 
-@with_transaction
-def is_item_available(menu_item: menu_item.MenuItem, quantity: int = 1) -> bool:
-    """
-    Check if a menu item is available in the requested quantity
-    """
-    if quantity <= 0:
-        raise ValueError('Quantity must be positive')
-    return menu_utils.check_item_availability(menu_item, quantity)
+def find_menu_item_by_name(
+    name: str, use_fuzzy: bool = False, cutoff: float = 0.6
+) -> Optional[MenuItem]:
+    """Try exact, partial, then optional fuzzy matching."""
+    exact_match = get_menu_item(name=name)
+    if exact_match or not use_fuzzy:
+        return exact_match
+    partial_match = MenuItem.objects.filter(name__icontains=name).first()
+    if partial_match:
+        return partial_match
+    names = list(MenuItem.objects.values_list('name', flat=True))
+    matches = get_close_matches(name, names, n=1, cutoff=cutoff)
+    return get_menu_item(name=matches[0]) if matches else None
 
 
-@with_transaction
-def add_menu_item(name: str, price: float, category: str) -> menu_item.MenuItem:
-    """
-    Add a new menu item and create its corresponding inventory item.
-
-    Args:
-        name: Name of the menu item
-        price: Price of the menu item
-        category: Category of the menu item
-
-    Returns:
-        MenuItem: The created menu item
-    """
-    try:
-        name = validate_name(name)
-        price = validate_price(price)
-        category = validate_category(category)
-
-        # Check if menu item already exists
-        if menu_item.MenuItem.objects.filter(name=name).exists():
-            raise ValueError(f"Menu item with name '{name}' already exists")
-
-        # Create menu item
-        new_menu_item = menu_item.MenuItem(name=name, price=price, category=category)
-        new_menu_item.save()
-
-        # Create corresponding inventory item
-        from menu_app.models.inventory import InventoryItem
-
-        inventory_item = InventoryItem(
-            menu_item=new_menu_item,
-            quantity=0,  # Start with 0 quantity
-        )
-        inventory_item.save()
-
-        logger.info(f'Created new menu item: {name} with inventory')
-        return new_menu_item
-
-    except Exception as e:
-        logger.error(f'Error adding menu item: {e!s}')
-        raise
+@transaction.atomic
+def add_menu_item(name: str, price: float, category: str) -> MenuItem:
+    name = validate_name(name)
+    price = validate_price(price)
+    category = validate_category(category)
+    if MenuItem.objects.filter(name=name).exists():
+        raise ValueError(f"Menu item with name '{name}' already exists")
+    item = MenuItem.objects.create(name=name, price=price, category=category)
+    inventory_service.create_inventory(item)
+    return item
 
 
-@with_transaction
+@transaction.atomic
 def modify_menu_item(
-    menu_item: menu_item.MenuItem,
+    menu_item: MenuItem,
     name: Optional[str] = None,
     price: Optional[float] = None,
     category: Optional[str] = None,
-) -> menu_item.MenuItem:
-    """
-    Modify an existing menu item
-    """
-    if not menu_item:
+) -> MenuItem:
+    if menu_item is None:
         raise ValueError('Menu item cannot be None')
-
     if name is not None:
-        standardized_name = validate_name(name)
-        if standardized_name != menu_item.name:
-            if menu_utils.get_menu_item(name=standardized_name):
-                raise ValueError(f"Menu item with name '{standardized_name}' already exists")
-            menu_item.name = standardized_name
-
+        name = validate_name(name)
+        if MenuItem.objects.filter(name=name).exclude(pk=menu_item.pk).exists():
+            raise ValueError(f"Menu item with name '{name}' already exists")
+        menu_item.name = name
     if price is not None:
         menu_item.price = validate_price(price)
-
     if category is not None:
         menu_item.category = validate_category(category)
-
     menu_item.save()
     return menu_item

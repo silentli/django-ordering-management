@@ -1,13 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
-from threading import Barrier, Event
+from threading import Event
 
 import pytest
 from django.core.exceptions import PermissionDenied
 from django.db import close_old_connections, connection, connections, transaction
 
 from menu_app.models import InventoryItem, MenuItem, Order, OrderItem
-from menu_app.services import inventory_service, menu_service, menu_utils, order_service
+from menu_app.services import inventory_service, menu_service, order_service
 
 
 @pytest.fixture
@@ -28,39 +28,38 @@ def test_place_order_rejects_empty_cart():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_competing_checkouts_cannot_buy_the_same_stock(menu_item, inventory_item, monkeypatch):
+def test_competing_checkouts_cannot_buy_the_same_stock(menu_item, inventory_item):
     if connection.vendor != 'postgresql':
         pytest.skip('Concurrent checkout requires PostgreSQL')
 
     inventory_item.quantity = 1
     inventory_item.save()
-    barrier = Barrier(2)
-    original_check = menu_utils.check_item_availability
+    update_started = Event()
 
-    def synchronized_check(item, quantity=1):
-        available = original_check(item, quantity)
-        # Both requests see the last item before either tries to deduct it.
-        barrier.wait(timeout=10)
-        return available
+    def signal_update(execute, sql, params, many, context):
+        if sql.startswith(f'UPDATE "{InventoryItem._meta.db_table}"'):
+            update_started.set()
+        return execute(sql, params, many, context)
 
-    monkeypatch.setattr(menu_utils, 'check_item_availability', synchronized_check)
     cart = {str(menu_item.id): 1}
 
     def checkout():
         close_old_connections()
         try:
-            order_service.place_order(cart)
+            with connection.execute_wrapper(signal_update):
+                order_service.place_order(cart)
             return True
-        except RuntimeError as exc:
-            assert 'Insufficient stock' in str(exc)
+        except ValueError:
             return False
         finally:
             connections.close_all()
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(lambda _: checkout(), range(2)))
-
-    assert sorted(results) == [False, True]
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with transaction.atomic():
+            order_service.place_order(cart)
+            future = executor.submit(checkout)
+            assert update_started.wait(timeout=10), 'The competing checkout did not reach stock'
+        assert not future.result(timeout=10)
     inventory_item.refresh_from_db()
     assert inventory_item.quantity == 0
     assert Order.objects.count() == 1
@@ -72,16 +71,15 @@ def test_competing_checkouts_cannot_buy_the_same_stock(menu_item, inventory_item
 def test_terminal_order_rejects_further_transitions(
     placed_order, inventory_item, action, staff_actor
 ):
-    stale_order = Order.objects.get(pk=placed_order.pk)
     if action == 'cancel':
-        placed_order.cancel(actor=staff_actor)
+        order_service.cancel_order(placed_order.pk, actor=staff_actor)
     else:
-        placed_order.complete()
+        order_service.complete_order(placed_order.pk)
 
     with pytest.raises(ValueError):
-        stale_order.cancel(actor=staff_actor)
+        order_service.cancel_order(placed_order.pk, actor=staff_actor)
     with pytest.raises(ValueError):
-        stale_order.complete()
+        order_service.complete_order(placed_order.pk)
 
     placed_order.refresh_from_db()
     inventory_item.refresh_from_db()
@@ -188,7 +186,7 @@ def test_removing_an_order_item_restores_its_stock(placed_order, menu_item, inve
 def test_cancellation_rejects_customers(placed_order, inventory_item, django_user_model):
     customer = django_user_model.objects.create_user(username='customer')
     with pytest.raises(PermissionDenied):
-        placed_order.cancel(actor=customer)
+        order_service.cancel_order(placed_order.pk, actor=customer)
 
     placed_order.refresh_from_db()
     inventory_item.refresh_from_db()
@@ -227,3 +225,21 @@ def test_order_read_interfaces_preserve_quantities_and_prices(
 
     other_item = MenuItem.objects.create(name='Not ordered', category='beverage', price='1.00')
     assert order_service.get_item_quantity(placed_order.pk, other_item.pk) == 0
+
+
+@pytest.mark.django_db
+def test_order_item_changes_preserve_price_and_stock(placed_order, menu_item, inventory_item):
+    original_price = menu_item.price
+    menu_service.modify_menu_item(menu_item, price=Decimal('99.00'))
+    order_service.add_item_to_order(placed_order.pk, menu_item.pk)
+    assert placed_order.items.get().quantity == 3
+    order_service.remove_item_from_order(placed_order.pk, menu_item.pk)
+
+    with pytest.raises(ValueError):
+        order_service.add_item_to_order(placed_order.pk, menu_item.pk, quantity=4)
+
+    line = placed_order.items.get()
+    inventory_item.refresh_from_db()
+    assert line.quantity == 2
+    assert line.price_at_time_of_order == original_price
+    assert inventory_item.quantity == 3

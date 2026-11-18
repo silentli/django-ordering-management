@@ -1,9 +1,13 @@
+import logging
+
 from django.contrib import messages
 from django.shortcuts import redirect
 from django.views.generic import ListView
 
 from menu_app.models.menu_item import MenuItem
 from menu_app.services import menu_service, order_service
+
+logger = logging.getLogger(__name__)
 
 
 class MenuListView(ListView):
@@ -96,8 +100,11 @@ class MenuListView(ListView):
                 if cart:
                     try:
                         order_service.place_order(cart)
-                    except Exception as e:
-                        messages.error(request, f'Error processing order: {e!s}')
+                    except ValueError as e:
+                        messages.error(request, str(e))
+                    except Exception:
+                        logger.exception('Checkout failed')
+                        messages.error(request, 'Unable to place your order. Please try again.')
                     else:
                         # The order transaction has succeeded; only now clear the cart.
                         del request.session['cart']

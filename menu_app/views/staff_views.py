@@ -124,9 +124,12 @@ class StaffMenuCreateView(LoginRequiredMixin, CreateView):
             )
             messages.success(self.request, 'Menu item created successfully.')
             return redirect(self.success_url)
-        except Exception as e:
-            messages.error(self.request, f'Error creating menu item: {e!s}')
-            return self.form_invalid(form)
+        except ValueError as e:
+            messages.error(self.request, str(e))
+        except Exception:
+            logger.exception('Menu creation failed')
+            messages.error(self.request, 'Unable to create the menu item. Please try again.')
+        return self.form_invalid(form)
 
 
 class StaffMenuUpdateView(LoginRequiredMixin, UpdateView):
@@ -152,9 +155,12 @@ class StaffMenuUpdateView(LoginRequiredMixin, UpdateView):
             )
             messages.success(self.request, 'Menu item updated successfully.')
             return redirect(self.success_url)
-        except Exception as e:
-            messages.error(self.request, f'Error updating menu item: {e!s}')
-            return self.form_invalid(form)
+        except ValueError as e:
+            messages.error(self.request, str(e))
+        except Exception:
+            logger.exception('Menu update failed')
+            messages.error(self.request, 'Unable to update the menu item. Please try again.')
+        return self.form_invalid(form)
 
 
 class StaffMenuDeleteView(LoginRequiredMixin, DeleteView):
@@ -234,8 +240,9 @@ class InventoryUpdateView(LoginRequiredMixin, View):
             messages.error(request, 'Menu item not found')
         except ValueError as e:
             messages.error(request, str(e))
-        except Exception as e:
-            messages.error(request, f'Error updating inventory: {e!s}')
+        except Exception:
+            logger.exception('Inventory update failed')
+            messages.error(request, 'Unable to update stock. Please try again.')
 
         return redirect('menu_app:inventory_list')
 
@@ -290,8 +297,11 @@ class StaffOrderDetailView(LoginRequiredMixin, View):
                 messages.error(request, 'Invalid action.')
         except PermissionDenied:
             raise
-        except Exception as e:
-            messages.error(request, f'Error processing order: {e!s}')
+        except ValueError as e:
+            messages.error(request, str(e))
+        except Exception:
+            logger.exception('Order action failed')
+            messages.error(request, 'Unable to update the order. Please try again.')
 
         return redirect('staff_order_list')
 

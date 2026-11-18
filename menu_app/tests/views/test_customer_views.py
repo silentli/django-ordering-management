@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.messages import get_messages
+from django.db import IntegrityError
 from django.urls import reverse
 
 from menu_app.models import InventoryItem, MenuItem, Order, OrderItem
@@ -123,3 +124,31 @@ def test_empty_checkout_does_not_create_order(client):
     response = client.post(reverse('menu_app:menu_list'), {'action': 'checkout'})
     assert response.status_code == 302
     assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+def test_unexpected_checkout_failure_rolls_back_and_keeps_diagnostics_private(
+    client, menu_item, inventory_item, test_data, monkeypatch
+):
+    cart = {str(menu_item.pk): 2}
+    session = client.session
+    session['cart'] = cart
+    session.save()
+    create_line = OrderItem.objects.create
+    private_diagnostic = 'private storage diagnostic'
+
+    def failing_create(*args, **kwargs):
+        create_line(*args, **kwargs)
+        raise IntegrityError(private_diagnostic)
+
+    monkeypatch.setattr(OrderItem.objects, 'create', failing_create)
+    response = client.post(reverse('menu_app:menu_list'), {'action': 'checkout'}, follow=True)
+
+    assert response.status_code == 200
+    assert private_diagnostic not in response.content.decode()
+    assert any(message.level_tag == 'error' for message in get_messages(response.wsgi_request))
+    assert client.session['cart'] == cart
+    assert not Order.objects.exists()
+    assert not OrderItem.objects.exists()
+    inventory_item.refresh_from_db()
+    assert inventory_item.quantity == test_data['quantity']

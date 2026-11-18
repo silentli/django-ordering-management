@@ -1,7 +1,7 @@
 import pytest
 
 from menu_app.models import InventoryItem, MenuItem
-from menu_app.services import menu_service
+from menu_app.services import inventory_service, menu_service
 
 
 @pytest.mark.django_db
@@ -30,3 +30,18 @@ def test_bulk_menu_lookup_requires_one_selector():
         menu_service.get_menu_items()
     with pytest.raises(ValueError):
         menu_service.get_menu_items(menu_item_ids=[1], names=['Example'])
+
+
+@pytest.mark.django_db
+def test_menu_creation_rolls_back_if_inventory_initialization_fails(monkeypatch):
+    create_inventory = inventory_service.create_inventory
+
+    def failing_inventory(*args, **kwargs):
+        create_inventory(*args, **kwargs)
+        raise RuntimeError('Inventory initialization failed')
+
+    monkeypatch.setattr(inventory_service, 'create_inventory', failing_inventory)
+    with pytest.raises(RuntimeError):
+        menu_service.add_menu_item(name='New item', price=2, category='main')
+    assert not MenuItem.objects.exists()
+    assert not InventoryItem.objects.exists()

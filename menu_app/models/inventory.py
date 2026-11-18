@@ -37,10 +37,6 @@ class InventoryItem(models.Model):
         if self.low_stock_threshold <= 0:
             raise ValidationError('Low stock threshold must be positive')
 
-    def save(self, *args, **kwargs):
-        self.clean()
-        super().save(*args, **kwargs)
-
     @property
     def is_low_stock(self) -> bool:
         """Check if the item is low on stock."""
@@ -50,17 +46,3 @@ class InventoryItem(models.Model):
     def is_sold_out(self) -> bool:
         """Check if the item is sold out."""
         return self.quantity == 0
-
-    def add_stock(self, amount: int) -> None:
-        """Add stock to inventory."""
-        from menu_app.services import inventory_service
-
-        inventory_service.add_stock(self.menu_item, amount)
-        self.refresh_from_db(fields=['quantity'])
-
-    def remove_stock(self, amount: int) -> None:
-        """Remove stock from inventory."""
-        from menu_app.services import inventory_service
-
-        inventory_service.remove_stock(self.menu_item, amount)
-        self.refresh_from_db(fields=['quantity'])
