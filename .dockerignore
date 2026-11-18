@@ -1,0 +1,38 @@
+# Version control and local tooling
+.git/
+.github/
+.idea/
+.vscode/
+**/.DS_Store
+
+# Tests and caches
+**/tests/
+ci_acceptance/
+pytest.ini
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+.coverage*
+htmlcov/
+coverage.xml
+
+# Local dependencies
+.venv/
+venv/
+menu_venv/
+ENV/
+**/node_modules/
+
+# Local configuration and runtime data
+**/.env
+**/.env.*
+menu_management/settings/env/
+data/
+media/
+staticfiles/
+**/*.log
+**/*.sqlite3
+**/*.sqlite3-journal
+**/*.dump
+**/*.backup
