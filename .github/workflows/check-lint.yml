@@ -2,9 +2,26 @@ name: Lint
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+    paths:
+      - '**.py'
+      - '**/pyproject.toml'
+      - '**/ruff.toml'
+      - '**/.ruff.toml'
+      - '.pre-commit-config.yaml'
+      - 'requirements/quality.txt'
+      - '.github/workflows/check-lint.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
+    paths:
+      - '**.py'
+      - '**/pyproject.toml'
+      - '**/ruff.toml'
+      - '**/.ruff.toml'
+      - '.pre-commit-config.yaml'
+      - 'requirements/quality.txt'
+      - '.github/workflows/check-lint.yml'
+  workflow_dispatch:
 
 jobs:
   lint:

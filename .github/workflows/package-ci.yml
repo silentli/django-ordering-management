@@ -3,8 +3,15 @@ name: Package CI
 on:
   push:
     branches: [main]
+    paths:
+      - 'ci_acceptance/**'
+      - '.github/workflows/package-ci.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'ci_acceptance/**'
+      - '.github/workflows/package-ci.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read

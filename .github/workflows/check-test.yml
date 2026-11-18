@@ -2,9 +2,28 @@ name: Test
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+    paths:
+      - 'menu_app/**'
+      - 'menu_management/**'
+      - 'manage.py'
+      - 'requirements/**'
+      - 'requirements.txt'
+      - 'pytest.ini'
+      - 'pyproject.toml'
+      - '.github/workflows/check-test.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
+    paths:
+      - 'menu_app/**'
+      - 'menu_management/**'
+      - 'manage.py'
+      - 'requirements/**'
+      - 'requirements.txt'
+      - 'pytest.ini'
+      - 'pyproject.toml'
+      - '.github/workflows/check-test.yml'
+  workflow_dispatch:
 
 jobs:
   test:
