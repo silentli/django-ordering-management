@@ -79,3 +79,5 @@ init-scripts/
 
 # Environment variables
 menu_management/settings/env/*
+.env
+.env.*

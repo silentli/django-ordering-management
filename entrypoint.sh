@@ -19,16 +19,5 @@ python manage.py migrate
 echo "Loading initial data..."
 python manage.py load_initial_data
 
-# Create superuser
-echo "Creating superuser..."
-python manage.py shell -c "
-from django.contrib.auth.models import User
-if not User.objects.filter(username='admin').exists():
-    User.objects.create_superuser('admin', 'admin@example.com', 'admin')
-    print('Superuser created.')
-else:
-    print('Superuser already exists.')
-"
-
 # Run the command provided as arguments to this script
-exec "$@" 
+exec "$@"

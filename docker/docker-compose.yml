@@ -22,7 +22,6 @@ services:
       dockerfile: docker/Dockerfile.prod
     restart: unless-stopped
     volumes:
-      - ..:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media
     expose:
@@ -36,6 +35,33 @@ services:
       - DJANGO_SETTINGS_MODULE=menu_management.settings.production
       - DJANGO_ENV=production
     command: gunicorn menu_management.wsgi:application --bind 0.0.0.0:8000
+    networks:
+      - app_network
+
+  init-admin:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    profiles: [admin]
+    restart: "no"
+    env_file:
+      - ../menu_management/settings/env/.env
+      - path: ../.env.admin
+        required: false
+    environment:
+      - DJANGO_SETTINGS_MODULE=menu_management.settings.production
+      - DJANGO_ENV=production
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        : "$${DJANGO_SUPERUSER_USERNAME:?Set DJANGO_SUPERUSER_USERNAME in .env.admin}"
+        : "$${DJANGO_SUPERUSER_EMAIL:?Set DJANGO_SUPERUSER_EMAIL in .env.admin}"
+        : "$${DJANGO_SUPERUSER_PASSWORD:?Set DJANGO_SUPERUSER_PASSWORD in .env.admin}"
+        exec python manage.py createsuperuser --noinput
     networks:
       - app_network
 
@@ -64,4 +90,4 @@ networks:
 volumes:
   postgres_data:
   static_volume:
-  media_volume: 
+  media_volume:
