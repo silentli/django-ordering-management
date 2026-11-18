@@ -1,8 +1,13 @@
 #!/bin/sh
 
+set -eu
+
+: "${POSTGRES_HOST:?POSTGRES_HOST must be set}"
+: "${POSTGRES_PORT:?POSTGRES_PORT must be set}"
+
 # Wait for PostgreSQL
 echo "Waiting for PostgreSQL..."
-while ! nc -z -w 1 $POSTGRES_HOST $POSTGRES_PORT; do
+while ! nc -z -w 1 "$POSTGRES_HOST" "$POSTGRES_PORT"; do
   sleep 1
   echo "Still waiting for PostgreSQL..."
 done
