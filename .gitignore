@@ -68,6 +68,7 @@ coverage.xml
 
 # Project specific
 /data/
+.deploy.lock
 init-scripts/
 
 # Docker

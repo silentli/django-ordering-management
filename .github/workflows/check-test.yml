@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'menu_app/**'
+      - 'scripts/**'
       - 'menu_management/**'
       - 'manage.py'
       - 'requirements/**'
@@ -16,6 +17,7 @@ on:
     branches: [main]
     paths:
       - 'menu_app/**'
+      - 'scripts/**'
       - 'menu_management/**'
       - 'manage.py'
       - 'requirements/**'
@@ -67,3 +69,6 @@ jobs:
 
     - name: Run tests
       run: python -m pytest
+
+    - name: Test host management safeguards
+      run: python -m unittest discover -s scripts/tests -v

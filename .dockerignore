@@ -1,6 +1,7 @@
 # Version control and local tooling
 .git/
 .github/
+.deploy.lock
 .idea/
 .vscode/
 **/.DS_Store
