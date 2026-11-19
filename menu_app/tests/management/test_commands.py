@@ -1,12 +1,28 @@
 import json
 from decimal import Decimal
 from io import StringIO
+from pathlib import Path
 
 import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
 from menu_app.models import InventoryItem, MenuItem
+
+
+@pytest.mark.django_db
+def test_default_import_uses_bundled_initial_menu():
+    source = Path(__file__).resolve().parents[2] / 'data' / 'initial_menu_items.json'
+    data = json.loads(source.read_text(), parse_float=Decimal)
+
+    call_command('load_initial_data', stdout=StringIO())
+
+    assert MenuItem.objects.count() == len(data['menu_items'])
+    for item in data['menu_items']:
+        saved = MenuItem.objects.get(name=item['name'])
+        assert saved.price == Decimal(str(item['price']))
+        assert saved.category == item['category']
+        assert saved.inventory.quantity == data['initial_inventory_quantity']
 
 
 @pytest.mark.django_db

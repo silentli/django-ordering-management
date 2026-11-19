@@ -38,6 +38,16 @@ Expected result: `db` and `web` become healthy, `nginx` runs, and `collect-stati
 exits successfully. Open the [customer menu](http://localhost/menu/) or
 [staff login](http://localhost/staff/login/).
 
+The menu starts empty. To import the bundled initial menu and inventory:
+
+```sh
+docker compose -f docker/docker-compose.yml exec -T web python manage.py load_initial_data
+```
+
+This reads `menu_app/data/initial_menu_items.json` and adds twelve items across
+four categories with 20 units of stock each. An optional file path can be supplied.
+The command skips import when menu items already exist.
+
 This starts the production settings profile with the repository's HTTP configuration.
 Public deployment requires the environment checks in the
 [deployment guide](docs/devops/deployment.md).

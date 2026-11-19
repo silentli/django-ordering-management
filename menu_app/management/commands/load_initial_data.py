@@ -13,7 +13,13 @@ class Command(BaseCommand):
     help = 'Explicitly load demo menu and inventory data into an empty menu'
 
     def add_arguments(self, parser):
-        parser.add_argument('data_file', type=Path, help='Path to the demo menu JSON file')
+        parser.add_argument(
+            'data_file',
+            nargs='?',
+            type=Path,
+            default=Path(__file__).resolve().parents[2] / 'data' / 'initial_menu_items.json',
+            help='Menu JSON file (defaults to menu_app/data/initial_menu_items.json)',
+        )
 
     def handle(self, *args, **options):
         if MenuItem.objects.exists():

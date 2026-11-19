@@ -67,7 +67,7 @@ coverage.xml
 .hypothesis/
 
 # Project specific
-data/
+/data/
 init-scripts/
 
 # Docker

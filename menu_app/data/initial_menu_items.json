@@ -1,0 +1,65 @@
+{
+    "menu_items": [
+        {
+            "category": "appetizer",
+            "name": "Garlic Bread",
+            "price": 4.99
+        },
+        {
+            "category": "appetizer",
+            "name": "Mozzarella Sticks",
+            "price": 6.99
+        },
+        {
+            "category": "appetizer",
+            "name": "Chicken Wings",
+            "price": 8.99
+        },
+        {
+            "category": "main",
+            "name": "Margherita Pizza",
+            "price": 12.99
+        },
+        {
+            "category": "main",
+            "name": "Pepperoni Pizza",
+            "price": 14.99
+        },
+        {
+            "category": "main",
+            "name": "Veggie Burger",
+            "price": 10.99
+        },
+        {
+            "category": "main",
+            "name": "Grilled Salmon",
+            "price": 17.99
+        },
+        {
+            "category": "dessert",
+            "name": "Chocolate Cake",
+            "price": 5.99
+        },
+        {
+            "category": "dessert",
+            "name": "Tiramisu",
+            "price": 6.99
+        },
+        {
+            "category": "beverage",
+            "name": "Cola",
+            "price": 2.99
+        },
+        {
+            "category": "beverage",
+            "name": "Iced Tea",
+            "price": 2.49
+        },
+        {
+            "category": "beverage",
+            "name": "Coffee",
+            "price": 2.99
+        }
+    ],
+    "initial_inventory_quantity": 20
+}
