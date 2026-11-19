@@ -1,140 +1,55 @@
 # Menu Management System
 
-A Django-based menu ordering service with PostgreSQL integration, packaged with Docker for easy deployment.
+A Django application for menu management, inventory tracking, and order processing,
+with customer and staff interfaces.
 
-## Features
+## Stack
 
-- **Menu Management**: Create, update, and manage menu items
-- **Inventory Tracking**: Real-time stock monitoring
-- **Order Processing**: Streamlined order creation and management
-- **Dual Interface**: Separate views for customers and staff
-- **Docker Support**: Containerized deployment for consistency
-- **Nginx Integration**: Production-grade web server with SSL support and optimized request handling
+| Component | Configured version |
+| --- | --- |
+| Python | 3.12 |
+| Django | 5.1.0 |
+| Gunicorn | 21.2.0 |
+| Nginx | 1.25 (Alpine) |
+| PostgreSQL | 14 |
 
-## Prerequisites
+## Quick start
 
-- Docker and Docker Compose
-- Git
-- Python 3.12 or later
-- PostgreSQL client tools
+Prerequisites: Git, Docker, and
+[Docker Compose 2.24.0+](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/).
+Python runs inside the application container.
 
-## Environment Setup
-
-Environment variables are managed using `.env` files located in `menu_management/settings/env/`.
-
-- For production: `menu_management/settings/env/.env`
-- For testing: `menu_management/settings/env/.env.test`
-- Example template: `menu_management/settings/env/.env.example`
-
-## Quick Start
-
-```bash
-# Clone the repository
+```sh
 git clone https://github.com/silentli/menu-management-demo.git
 cd menu-management-demo
-
-# Build and start all containers
-docker compose -f docker/docker-compose.yml up --build -d
-
-# Access the application
-http://localhost/menu/  # Customer menu interface
-http://localhost/staff/ # Staff management interface
+cp -n menu_management/settings/env/.env.example menu_management/settings/env/.env
+chmod 600 menu_management/settings/env/.env
 ```
 
-## Architecture
+Set unique values for `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`, and `STAFF_PASSWORD`
+in the new file. Keep `POSTGRES_HOST=db` and `POSTGRES_PORT=5432` for Compose.
+Existing configuration must remain intact.
 
-The application uses a multi-container setup:
-- **Web**: Django application server
-- **Nginx**: Web server for handling HTTP requests and serving static files
-- **PostgreSQL**: Database server
-
-## Code Quality
-
-### Linting
-
-The project uses `ruff` for linting and code quality checks. To run the linter:
-
-```bash
-# Install linting dependencies
-pip install -r requirements/quality.txt
-
-# Run the linter
-ruff check .
-
-# Run the linter with auto-fix
-ruff check --fix .
+```sh
+docker compose -f docker/docker-compose.yml up --build -d --wait
 ```
 
-Common linting rules:
-- `RUF022`: `__all__` lists must be sorted alphabetically
-- `E501`: Line length should not exceed 88 characters
-- `F401`: Unused imports should be removed
+Expected result: `db` and `web` become healthy, `nginx` runs, and `collect-static`
+exits successfully. Open the [customer menu](http://localhost/menu/) or
+[staff login](http://localhost/staff/login/).
 
-### Pre-commit Hooks
+This starts the production settings profile with the repository's HTTP configuration.
+Public deployment requires the environment checks in the
+[deployment guide](docs/devops/deployment.md).
 
-The project includes pre-commit hooks to ensure code quality before commits:
+## Documentation
 
-```bash
-# Create and activate the development environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install pre-commit in this environment
-python -m pip install pre-commit==3.6.2
-
-# Install the git hooks
-python -m pre_commit install
-
-# Run pre-commit on all files
-python -m pre_commit run --all-files
-```
-
-The Git hook uses the Python environment that installed it. After moving or
-recreating that environment, activate it and run `python -m pre_commit install`
-again. Ruff is pinned to `0.11.9` in the hooks, dependencies, and CI.
-
-## Testing
-
-### Setup Test Environment
-
-1. Start the test database:
-```bash
-docker compose -f docker/docker-compose.test.yml up -d --wait db
-```
-
-2. Install test dependencies:
-```bash
-pip install -r requirements/test.txt
-```
-
-No manual migrations are required. pytest-django creates a separate database named
-`test_<POSTGRES_DB>`, applies migrations, and drops it after the test run.
-For example, `POSTGRES_DB=menu_management_test` uses `test_menu_management_test`.
-The PostgreSQL user must have permission to create databases (`CREATEDB`).
-Use the dedicated test PostgreSQL instance, configured through `.env.test` or
-environment variables, rather than a production server.
-
-### Running Tests
-
-Run tests using pytest with the correct environment:
-
-```bash
-# Run all tests
-DJANGO_ENV=test python -m pytest
-
-# Run specific test file
-DJANGO_ENV=test python -m pytest menu_app/tests/models/test_models.py
-
-# Optionally keep the test database between local runs
-DJANGO_ENV=test python -m pytest --reuse-db
-
-# Rebuild a reused test database after migration changes
-DJANGO_ENV=test python -m pytest --reuse-db --create-db
-```
-
-### Test Suite Coverage
-
-The test suite includes:
-- Model tests (menu items, inventory, orders)
-- View tests (customer and staff interfaces)
-- Integration tests (order flow, inventory updates)
+| Topic | Scope |
+| --- | --- |
+| [Overview](docs/README.md) | Engineering status, system architecture, operational handover |
+| [Development](docs/development.md) | Local environment, pytest, Ruff, pre-commit |
+| [DevOps](docs/devops/README.md) | Deployment topology, persistent storage, environment status |
+| [CI](docs/devops/ci.md) | Workflows, triggers, runners, permissions, failure diagnostics |
+| [Deployment](docs/devops/deployment.md) | Configuration, provisioning, release verification, rollback |
+| [Backup and restore](docs/devops/backup-and-restore.md) | Database archives, restore validation, recovery coverage |
+| [Maintenance](docs/devops/maintenance.md) | Service diagnostics, incident triage, recurring checks |
