@@ -53,9 +53,7 @@ def test_checkout_process(client, menu_item, inventory_item, test_data):
     assert response.status_code == 302  # Redirect after checkout
 
     # Check cart is empty after checkout
-    session = client.session
-    session.save()  # Save the session to persist changes
-    assert 'cart' not in session
+    assert 'cart' not in client.session
 
     # Verify inventory was updated
     inventory_item.refresh_from_db()

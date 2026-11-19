@@ -33,7 +33,7 @@ def inventory_item(menu_item, test_data):
 
 
 @pytest.fixture
-def order(menu_item):
+def order():
     """Fixture providing a test order."""
     return Order.objects.create(status='pending')
 

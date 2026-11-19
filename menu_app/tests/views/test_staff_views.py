@@ -1,5 +1,4 @@
 import pytest
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.urls import reverse
@@ -11,21 +10,29 @@ from menu_app.services import inventory_service, menu_service, order_service
 @pytest.fixture
 def staff_user():
     """Fixture providing a staff user."""
-    user, _created = User.objects.get_or_create(
-        username='staff', defaults={'is_staff': True, 'is_active': True}
-    )
-    # Set the password to match settings.STAFF_PASSWORD
-    user.set_password(settings.STAFF_PASSWORD)
-    user.save()
-    return user
+    return User.objects.create_user(username='staff', is_staff=True)
 
 
 @pytest.mark.django_db
-def test_staff_login_success(client, staff_user):
-    """Test successful staff login."""
+@pytest.mark.parametrize('existing_user', [False, True], ids=['first-login', 'changed-password'])
+def test_staff_login_creates_or_updates_account(client, settings, existing_user):
+    settings.STAFF_PASSWORD = 'new-staff-password'
+    if existing_user:
+        original = User.objects.create_user(
+            username='staff', password='old-staff-password', is_staff=True
+        )
+
     response = client.post(reverse('menu_app:staff_login'), {'password': settings.STAFF_PASSWORD})
-    assert response.status_code == 302  # Redirect after successful login
+
+    staff_user = User.objects.get(username='staff')
+    assert response.status_code == 302
     assert client.session.get('_auth_user_id') == str(staff_user.id)
+    assert staff_user.is_staff and staff_user.is_active
+    assert staff_user.check_password(settings.STAFF_PASSWORD)
+    assert User.objects.count() == 1
+    if existing_user:
+        assert staff_user.pk == original.pk
+        assert not staff_user.check_password('old-staff-password')
 
 
 @pytest.mark.django_db
@@ -51,7 +58,7 @@ def test_staff_login_rejects_missing_password_configuration(client, settings):
 @pytest.mark.django_db
 def test_order_management_view(client, staff_user, menu_item, inventory_item):
     """Test order management functionality."""
-    client.login(username='staff', password=settings.STAFF_PASSWORD)
+    client.force_login(staff_user)
     order = order_service.place_order({str(menu_item.pk): 1})
 
     # Test order list view
@@ -101,7 +108,7 @@ def test_customers_cannot_cancel_orders(client, django_user_model, menu_item, in
 @pytest.mark.django_db
 def test_inventory_management_view(client, staff_user, menu_item, inventory_item):
     """Test inventory management functionality."""
-    client.login(username='staff', password=settings.STAFF_PASSWORD)
+    client.force_login(staff_user)
 
     # Test inventory list view
     response = client.get(reverse('menu_app:inventory_list'))
@@ -211,9 +218,6 @@ def test_low_stock_page_uses_each_items_threshold(client, staff_user):
     response = client.get(reverse('menu_app:low_stock_list'))
 
     assert response.status_code == 200
-    assert {stock.pk for stock in response.context['low_stock_items']} == {
-        stock.pk for stock in stocks if stock.is_low_stock
-    }
     assert {stock.pk for stock in response.context['low_stock_items']} == {
         stocks[0].pk,
         stocks[1].pk,
