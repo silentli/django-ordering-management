@@ -2,19 +2,22 @@
 
 Scope: service inspection, incident triage, and recurring maintenance for the
 checked-in Compose stack. Commands run on the target host from the repository root
-with Docker access. Validation status: source-reviewed on 2026-11-19; no live
-incident or maintenance operation was performed.
+with Docker access.
 
 ## Status and logs
 
 ```sh
-docker compose -f docker/docker-compose.yml ps -a
-docker compose -f docker/docker-compose.yml logs --tail=100 web nginx db collect-static
+python3 scripts/manage.py status
+python3 scripts/manage.py logs
 docker compose -f docker/docker-compose.yml exec -T nginx nginx -t
 docker compose -f docker/docker-compose.yml exec -T web python manage.py showmigrations --plan
 df -h
 docker system df
 ```
+
+`python3 scripts/manage.py doctor` combines status, recent logs, and application
+checks. It requires running Web and Nginx services. For a custom Compose project,
+use the same `--project-name NAME` on script and direct Compose commands.
 
 Expected state: `db` and `web` are healthy, `nginx` is running, and `collect-static`
 has exited with code `0`. `init-admin` may be absent because it is an optional task.
@@ -40,9 +43,9 @@ Preserve logs before replacing services. Follow the relevant symptom below:
 | Web repeatedly restarts | Missing variable errors, DB reachability, migration output | Correct the first startup failure before retrying |
 | Missing or stale CSS | `collect-static` exit status, static manifest errors, Nginx logs | Check the collection job and shared volume for the release |
 | Healthy endpoint but failed page | Database-backed request and Web logs | `/health/` does not query the database |
-| Database unhealthy | DB logs, initialized role, disk space | Healthcheck assumes `postgres`; changing `.env` does not modify existing roles |
+| Database unhealthy | DB logs, initialized role, disk space | Healthcheck uses the configured role; changing `.env` does not modify existing roles |
 | Empty database after a move | Compose project name and attached volumes | Locate the original volumes before any initialization or recovery |
-| Backup missing | Actual host scheduler and destination | Repository contains no configured backup job; use the backup topic |
+| Backup missing | `data/backups/`, actual host scheduler and destination | Script backups run on demand and before update/deletion; no recurring job is configured |
 
 A Web restart executes migrations and is not a neutral diagnostic action. For
 data or schema damage, preserve volumes and follow the recovery constraints in

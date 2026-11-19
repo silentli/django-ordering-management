@@ -15,38 +15,29 @@ with customer and staff interfaces.
 
 ## Quick start
 
-Prerequisites: Git, Docker, and
+Prerequisites: Git, Python 3.10+ on the Linux host, Docker, and
 [Docker Compose 2.24.0+](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/).
-Python runs inside the application container.
+Application dependencies run inside the container; the host script uses only
+the Python standard library.
 
 ```sh
 git clone https://github.com/silentli/menu-management-demo.git
 cd menu-management-demo
-cp -n menu_management/settings/env/.env.example menu_management/settings/env/.env
-chmod 600 menu_management/settings/env/.env
+python3 scripts/manage.py start
 ```
 
-Set unique values for `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`, and `STAFF_PASSWORD`
-in the new file. Keep `POSTGRES_HOST=db` and `POSTGRES_PORT=5432` for Compose.
-Existing configuration must remain intact.
-
-```sh
-docker compose -f docker/docker-compose.yml up --build -d --wait
-```
+The script generates a private `.env` with random secrets if absent, builds missing
+images, starts services, imports the initial menu, and verifies the application.
+Existing configuration and menu data are preserved. Read `STAFF_PASSWORD`
+from `menu_management/settings/env/.env` to sign in; credentials are not printed.
+Use `start --no-seed` for an installation without the sample menu.
 
 Expected result: `db` and `web` become healthy, `nginx` runs, and `collect-static`
 exits successfully. Open the [customer menu](http://localhost/menu/) or
 [staff login](http://localhost/staff/login/).
 
-The menu starts empty. To import the bundled initial menu and inventory:
-
-```sh
-docker compose -f docker/docker-compose.yml exec -T web python manage.py load_initial_data
-```
-
-This reads `menu_app/data/initial_menu_items.json` and adds twelve items across
-four categories with 20 units of stock each. An optional file path can be supplied.
-The command skips import when menu items already exist.
+See the [management commands](docs/devops/deployment.md#automated-host-management)
+for stop, update, backup, diagnostics, and removal.
 
 This starts the production settings profile with the repository's HTTP configuration.
 Public deployment requires the environment checks in the

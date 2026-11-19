@@ -1,18 +1,37 @@
 # Backup and restore
 
-Scope: manual backup of the Compose PostgreSQL database and an isolated restore
-exercise. Validation status: source-reviewed on 2026-11-19; commands have not been
-executed against a running database. Production recovery remains unverified.
+Scope: backup of the Compose PostgreSQL database and an isolated restore exercise.
+Production recovery remains unverified.
 
 ## Current coverage and constraints
 
-No backup script, schedule, retention policy, or offsite destination is checked in.
-Host-level jobs may exist but require separate verification.
+The [host management script](deployment.md#automated-host-management) backs up the
+database on demand and before updates or volume deletion. A sample archive passed
+an isolated restore; see the [validation record](deployment.md#validation-and-remaining-work).
+No recurring schedule, retention policy, or offsite destination is configured.
 
 A custom-format `pg_dump` archive includes one database's schema and data. It does
 not include cluster roles, runtime secrets, uploaded media, host configuration,
 or changes committed after the dump's consistent snapshot. A complete recovery plan
 must cover those separately and define acceptable data loss and recovery time.
+
+## Scripted database backup
+
+With the database running, execute from the repository root:
+
+```sh
+python3 scripts/manage.py backup
+```
+
+For another Compose project, put `--project-name NAME` before `backup`.
+The script writes a custom-format archive to `data/backups/`, named with the project,
+UTC timestamp, and random suffix. Files use mode `600`; only a nonempty dump whose
+directory passes `pg_restore --list` is published. Failed attempts remove the
+temporary file and return nonzero. `update` and `destroy` abort if this step fails.
+
+Keep the reported archive path with its source revision, database, image identity,
+and timestamp. Archive listing checks readability, not complete restoration.
+Copy archives to protected offsite storage; local host backups do not cover host loss.
 
 ## Manual database backup
 
@@ -20,6 +39,8 @@ Execution location: target host, repository root. Required access: Docker and a
 private writable backup directory. The `db` service must be running with its
 expected `POSTGRES_USER` and `POSTGRES_DB`. Confirm the Compose project identity
 before execution. The database remains online; the dump adds database and I/O load.
+The Compose examples use the default project `docker`; add `--project-name NAME`
+for a custom project.
 
 Set `backup_dir` to an approved absolute host path outside the checkout. The following
 POSIX shell block writes a private temporary file and publishes it only after archive
@@ -80,10 +101,11 @@ limited to this disposable container with no network access; it is not a product
 configuration. Wait for readiness:
 
 ```sh
-docker exec "$restore_container" pg_isready -U postgres -d restore_check
+docker exec "$restore_container" pg_isready -h 127.0.0.1 -U postgres -d restore_check
 ```
 
-Repeat the readiness check after a short interval if startup is still in progress.
+The TCP check waits for the final server rather than the temporary initialization
+server. Repeat it after a short interval if startup is still in progress.
 If readiness does not succeed within 60 seconds, inspect the container logs and
 stop the exercise. Once ready, restore:
 
@@ -123,10 +145,10 @@ replacement is specified here.
 
 ## Limitations and improvements
 
-- **Procedure validation:** Manual backup and restoration remain untested. Complete
-  a dump and isolated restore; retain the execution date and results.
-- **Scheduling:** No versioned backup job exists. Implement overlap handling, atomic
-  publication, and logging; verify a scheduled run.
+- **Recovery validation:** Rehearse with actual release backups, configuration, media,
+  and application checks; retain the results. The sample restore does not cover these.
+- **Scheduling:** Script backups are on demand and before updates/deletion. Configure
+  and verify a scheduled run; no recurring backup job is installed.
 - **Offsite storage and retention:** No policy is defined. Configure encrypted
   separate storage and retention; verify archive retrieval.
 - **Recovery coverage:** Database archives omit media, configuration, and cluster

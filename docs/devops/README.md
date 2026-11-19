@@ -38,8 +38,8 @@ considered separately from the internal service network.
 | `collect-static` | One-shot static asset collection before Web starts | Writes `static_volume` |
 | `init-admin` | Optional one-shot Django superuser creation | Writes to the database; `admin` profile |
 
-Compose prefixes volume names with its project name. Changing that name or moving
-the checkout can select different volumes. Record the existing project identity
+Compose prefixes volume names with its project name. Changing that name selects
+different volumes. The host script defaults to `docker`; record the project identity
 before a release or recovery operation. Static assets can be regenerated; database
 and uploaded media require separate protection.
 
@@ -57,8 +57,8 @@ the database; it does not prove business operations or recovery.
 | TLS and cookies | No TLS listener; secure cookie flags and SSL redirect disabled | Public HTTPS configuration and checks |
 | Secrets | Runtime `.env`; optional root `.env.admin` | Secret ownership, access, and recovery location |
 | Data | Database, static, and media volumes | Actual volume names, size, and storage location |
-| Backups | No backup script or scheduler checked in | Host jobs, destination, retention, restore evidence |
-| Releases | CI checks; no deployment workflow | Actual release process and responsibility |
+| Backups | Host script dumps DB before update/deletion; no scheduler | Offsite destination, retention, restore evidence |
+| Releases | Host script builds, backs up, and replaces services; no CI deployment | Source selection, recovery plan, and responsibility |
 | Monitoring | Container healthchecks and health route | External checks, alerts, response responsibility |
 
 The `production` settings name does not establish public deployment readiness.

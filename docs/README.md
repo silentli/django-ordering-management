@@ -2,8 +2,9 @@
 
 ## Engineering status
 
-Implementation and configuration status reflect source inspection;
-current CI results and live environments are unverified.
+Implementation status reflects the source. Local validation is recorded in
+[Deployment](devops/deployment.md#validation-and-remaining-work); current GitHub
+Actions results and production environments require separate verification.
 
 ### Development
 
@@ -11,18 +12,18 @@ current CI results and live environments are unverified.
 | --- | --- |
 | Application | Customer ordering; staff menu, inventory, and order management |
 | Business logic | Service layer, transaction-protected checkout, stock updates, order state transitions |
-| Automated tests | Model, service, view, health, and management-command tests; execution results unverified |
+| Automated tests | Model, service, view, health, management-command, and host-operation tests |
 | Local quality checks | Ruff lint/format checks, pre-commit |
 
 ### Deployment and operations
 
 | Area | Status | Outstanding work |
 | --- | --- | --- |
-| Container deployment | Implemented | Deployment rehearsal and live environment verification pending |
+| Container deployment | Implemented | Production host verification and recovery rehearsal pending |
 | Continuous integration | Implemented | Workflow results and external investigation runner/runtime unverified |
-| Release delivery | Partial | Manual procedure documented; deployment automation absent; release and rollback rehearsal pending |
+| Release delivery | Partial | Host management script available; source selection and rollback remain manual |
 | Public deployment | Partial | TLS, secure cookies, and database exposure require environment-specific configuration |
-| Backup automation | Not implemented | No versioned backup job; manual archive and restore procedures documented but not rehearsed |
+| Backup automation | Partial | Database dump before updates/deletion; scheduling, retention, offsite copies and recovery pending |
 | Monitoring | Partial | Container checks implemented; external availability checks and alerting absent from repository |
 | Environment inventory | Unknown | Host, domain, deployed revision, resource ownership, and runtime state not established |
 
@@ -59,6 +60,7 @@ Selected source, configuration, and documentation paths:
 ├── nginx/                     # Reverse proxy and asset-serving configuration
 ├── static/                    # Source static assets
 ├── requirements/              # Runtime, development, test, and quality dependencies
+├── scripts/                   # Host management CLI and safety tests
 ├── .github/workflows/         # CI and failure investigation workflows
 ├── ci_acceptance/             # Isolated CI tooling contracts
 ├── docs/                      # Technical documentation

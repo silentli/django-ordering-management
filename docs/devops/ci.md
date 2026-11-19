@@ -4,7 +4,7 @@
 
 | Workflow | Trigger | Runner | Validation |
 | --- | --- | --- | --- |
-| [Test](../../.github/workflows/check-test.yml) | Path-filtered push/PR to `main`; manual dispatch | `ubuntu-latest` | Django application tests |
+| [Test](../../.github/workflows/check-test.yml) | Path-filtered push/PR to `main`; manual dispatch | `ubuntu-latest` | Django application and host-operation tests |
 | [Lint](../../.github/workflows/check-lint.yml) | Path-filtered push/PR to `main`; manual dispatch | `ubuntu-latest` | Ruff lint and format checks |
 | [Package CI](../../.github/workflows/package-ci.yml) | Path-filtered push/PR to `main`; manual dispatch | `ubuntu-24.04` | Wheel build, clean install, package contracts |
 | [Investigate CI failure](../../.github/workflows/ci-investigate.yml) | Completion of Lint or Package CI on `main`, subject to job conditions | `self-hosted`, `macOS`, `X64`, `ci-investigator` | External investigation pipeline |
@@ -21,6 +21,8 @@
 The Test workflow starts PostgreSQL as a GitHub Actions service at
 `127.0.0.1:5432`. Database settings are supplied by the job; local `.env.test` is not
 required. pytest-django creates and migrates a separate test database.
+The workflow also runs `python -m unittest discover -s scripts/tests -v` for
+host-operation safeguards; these tests simulate Docker commands.
 
 Package CI runs independent matrix jobs for `logic`, `discovery`, and `dependency`.
 Contracts execute against installed wheels in clean environments. These packages
@@ -30,7 +32,7 @@ validate CI tooling rather than Django behavior.
 
 | Workflow | Path filter scope |
 | --- | --- |
-| Test | Application/project Python packages, management entry point, requirements, pytest/project configuration, Test workflow |
+| Test | Application/project packages, `scripts/**`, management entry point, requirements, pytest/project configuration, Test workflow |
 | Lint | Python files, Ruff/project configuration, pre-commit configuration, quality requirements, Lint workflow |
 | Package CI | `ci_acceptance/**` and Package CI workflow |
 
