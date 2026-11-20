@@ -1,6 +1,7 @@
 """Host-operation safeguards, tested without a Docker daemon or project data."""
 
 import importlib.util
+import json
 import subprocess
 import tempfile
 import unittest
@@ -16,6 +17,9 @@ spec.loader.exec_module(ops)
 
 class ManagementTests(unittest.TestCase):
     def setUp(self):
+        stdout = patch('sys.stdout', new=StringIO())
+        stdout.start()
+        self.addCleanup(stdout.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -81,25 +85,93 @@ class ManagementTests(unittest.TestCase):
         self.manager.backup.assert_called_once()
         self.manager.verify.assert_not_called()
 
-    def test_regular_start_reuses_images_and_seeds_then_verifies(self):
+    def test_regular_start_does_not_force_image_rebuild(self):
         self.manager.prepare_env = Mock()
         self.manager.require_env = Mock()
-        events = []
-        self.manager.compose = Mock(side_effect=lambda *args: events.append(args))
-        self.manager.verify = Mock(side_effect=lambda: events.append(('verify',)))
+        self.manager.compose = Mock()
+        self.manager.verify = Mock()
         self.manager.start(ops.parse_args(['start']))
-        self.assertFalse(any(args[0] == 'build' or '--build' in args for args in events))
-        started = next(i for i, args in enumerate(events) if args[0] == 'up')
-        seeded = next(i for i, args in enumerate(events) if 'load_initial_data' in args)
-        self.assertLess(started, seeded)
-        self.assertLess(seeded, events.index(('verify',)))
-        self.manager.verify.assert_called_once()
+        commands = [call.args for call in self.manager.compose.call_args_list]
+        self.assertTrue(any(args[0] == 'up' for args in commands))
+        self.assertFalse(any(args[0] == 'build' or '--build' in args for args in commands))
 
-    def test_failed_backup_removes_partial_archive(self):
-        self.manager.compose = Mock(side_effect=subprocess.CalledProcessError(1, ['pg_dump']))
-        with self.assertRaises(subprocess.CalledProcessError):
+    def test_backup_failure_is_logged_without_publishing_an_archive(self):
+        for stage in ('dump', 'archive-check'):
+            with self.subTest(stage=stage):
+
+                def fail_at_stage(*args, **kwargs):
+                    if stage == 'dump' or 'pg_restore' in args:
+                        raise subprocess.CalledProcessError(
+                            1, ['backup'], stderr=f'{stage} failed'.encode()
+                        )
+                    kwargs['stdout'].write(b'invalid contents')
+
+                self.manager.compose = Mock(side_effect=fail_at_stage)
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.manager.backup(source='scheduled')
+                directory = self.root / 'data/backups'
+                self.assertEqual([p.name for p in directory.iterdir()], ['backup.log'])
+                records = [
+                    json.loads(line) for line in (directory / 'backup.log').read_text().splitlines()
+                ][-2:]
+                self.assertEqual([r['status'] for r in records], ['started', 'failed'])
+                self.assertEqual(records[-1]['stage'], stage)
+                self.assertIn(f'{stage} failed', records[-1]['error'])
+
+    def test_manual_and_scheduled_backups_share_one_private_log(self):
+        def dump(*args, **kwargs):
+            if 'pg_restore' not in args:
+                kwargs['stdout'].write(b'archive contents')
+
+        self.manager.compose = Mock(side_effect=dump)
+        for source in ('manual', 'scheduled'):
+            archive = self.manager.backup(source=source)
+            self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
+        log = self.root / 'data/backups/backup.log'
+        records = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+        self.assertEqual([r['status'] for r in records], ['started', 'success'] * 2)
+        self.assertEqual([r['source'] for r in records], ['manual'] * 2 + ['scheduled'] * 2)
+        self.assertNotEqual(records[0]['run_id'], records[2]['run_id'])
+        for started, finished in (records[:2], records[2:]):
+            self.assertEqual(started['run_id'], finished['run_id'])
+            self.assertEqual(finished['bytes'], len(b'archive contents'))
+            self.assertTrue(Path(finished['archive']).exists())
+
+    @patch.object(ops.Manager, 'diagnostics')
+    @patch.object(ops.Manager, 'preflight')
+    def test_busy_scheduled_backup_is_logged_before_any_docker_call(self, preflight, _):
+        with ops.operation_lock(), patch('sys.stderr', new=StringIO()):
+            result = ops.main(['backup', '--source', 'scheduled'])
+        self.assertEqual(result, 1)
+        preflight.assert_not_called()
+        log = self.root / 'data/backups/backup.log'
+        record = json.loads(log.read_text().splitlines()[-1])
+        self.assertEqual(
+            (record['source'], record['status'], record['stage']), ('scheduled', 'failed', 'lock')
+        )
+
+    @patch.object(ops, 'write_backup_event', side_effect=OSError('log unavailable'))
+    def test_unwritable_log_prevents_backup(self, _):
+        self.manager.compose = Mock()
+        with self.assertRaises(OSError):
             self.manager.backup()
-        self.assertEqual(list((self.root / 'data/backups').iterdir()), [])
+        self.manager.compose.assert_not_called()
+
+    def test_preflight_failure_is_recorded_without_starting_dump(self):
+        self.manager.preflight = Mock(
+            side_effect=subprocess.CalledProcessError(
+                1, ['docker', 'compose', 'version'], stderr='Docker unavailable'
+            )
+        )
+        self.manager.compose = Mock()
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.manager.backup(source='scheduled', prepare=True)
+        self.manager.compose.assert_not_called()
+        log = self.root / 'data/backups/backup.log'
+        record = json.loads(log.read_text().splitlines()[-1])
+        self.assertEqual((record['status'], record['stage']), ('failed', 'preflight'))
+        self.assertIn('Docker unavailable', record['error'])
 
     def test_destroy_requires_exact_project_confirmation(self):
         with self.assertRaises(SystemExit), patch('sys.stderr', new=StringIO()):

@@ -3,11 +3,14 @@
 
 import argparse
 import fcntl
+import json
 import os
 import re
 import secrets
+import signal
 import subprocess
 import sys
+import time
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +28,22 @@ def private_write(path, content):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as target:
         target.write(content)
+
+
+def write_backup_event(event):
+    """Append one private JSON record, including attempts rejected by the operation lock."""
+    directory = ROOT / 'data/backups'
+    directory.mkdir(parents=True, exist_ok=True)
+    line = json.dumps({'timestamp': datetime.now(timezone.utc).isoformat(), **event}) + '\n'
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, 'O_NOFOLLOW', 0)
+    fd = os.open(directory / 'backup.log', flags, 0o600)
+    with os.fdopen(fd, 'a') as target:
+        fcntl.flock(target, fcntl.LOCK_EX)
+        os.fchmod(target.fileno(), 0o600)
+        target.write(line)
+        target.flush()
+        os.fsync(target.fileno())
+    print(line, end='', flush=True)
 
 
 @contextmanager
@@ -145,14 +164,70 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
             except (OSError, subprocess.CalledProcessError):
                 pass
 
-    def backup(self):
+    @contextmanager
+    def backup_record(self, source):
+        record = {'run_id': secrets.token_hex(8), 'project': self.project, 'source': source}
+        started = time.monotonic()
+        write_backup_event({**record, 'status': 'started'})
+        try:
+            yield record
+        except BaseException as error:
+            if isinstance(error, subprocess.CalledProcessError):
+                detail = f'Command failed (exit {error.returncode})'
+                if error.stderr:
+                    stderr = (
+                        error.stderr
+                        if isinstance(error.stderr, str)
+                        else error.stderr.decode(errors='replace')
+                    )
+                    detail += ': ' + stderr.strip()[:2000]
+            else:
+                detail = str(error) or type(error).__name__
+            try:
+                write_backup_event(
+                    {
+                        **record,
+                        'status': 'failed',
+                        'error': detail,
+                        'error_type': type(error).__name__,
+                        'duration_seconds': round(time.monotonic() - started, 3),
+                    }
+                )
+            except OSError as log_error:
+                print(f'Cannot record backup failure: {log_error}', file=sys.stderr)
+            raise
+        else:
+            write_backup_event(
+                {
+                    **record,
+                    'status': 'success',
+                    'duration_seconds': round(time.monotonic() - started, 3),
+                }
+            )
+
+    def backup(self, source='manual', prepare=False):
+        with self.backup_record(source) as record:
+            record['stage'] = 'lock'
+            with operation_lock() if prepare else nullcontext():
+                if prepare:
+                    record['stage'] = 'preflight'
+                    self.preflight()
+                    record['stage'] = 'configuration'
+                    self.require_env()
+                path = self._backup_archive(record)
+                record.update(archive=str(path), bytes=path.stat().st_size, stage='completed')
+        return path
+
+    def _backup_archive(self, record):
         directory = ROOT / 'data/backups'
         directory.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         path = directory / f'{self.project}-{stamp}-{secrets.token_hex(4)}.dump'
+        record['archive'] = str(path)
         temporary = path.with_suffix('.partial')
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
+            record['stage'] = 'dump'
             with os.fdopen(fd, 'wb') as target:
                 self.compose(
                     'exec',
@@ -162,9 +237,11 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
                     '-ec',
                     'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc',
                     stdout=target,
+                    stderr=subprocess.PIPE,
                 )
             if not temporary.stat().st_size:
                 raise OperationError('Database backup is empty; operation aborted.')
+            record['stage'] = 'archive-check'
             with temporary.open('rb') as source:
                 self.compose(
                     'exec',
@@ -174,11 +251,12 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
                     '--list',
                     stdin=source,
                     stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
                 )
+            record['stage'] = 'publish'
             temporary.rename(path)
         finally:
             temporary.unlink(missing_ok=True)
-        print(f'Database backup: {path}', flush=True)
         return path
 
     def start(self, args, update=False):
@@ -188,7 +266,7 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
             # Build failure leaves the running release untouched.
             self.compose('build')
             self.compose('up', '-d', '--wait', 'db')
-            self.backup()
+            self.backup(source='update')
             flags = ['--force-recreate']
         else:
             # Compose builds missing images on first install; reuse images on later starts.
@@ -231,7 +309,13 @@ def parse_args(argv=None):
     sub.add_parser('down', help='Remove containers and network; retain all persistent volumes')
     sub.add_parser('status', help='Show container state')
     sub.add_parser('doctor', help='Show status/logs and verify the application')
-    sub.add_parser('backup', help='Create and inspect a private PostgreSQL dump')
+    backup = sub.add_parser('backup', help='Create and inspect a private PostgreSQL dump')
+    backup.add_argument(
+        '--source',
+        choices=('manual', 'scheduled'),
+        default='manual',
+        help='Origin recorded in data/backups/backup.log',
+    )
     logs = sub.add_parser('logs', help='Show recent logs')
     logs.add_argument('--follow', action='store_true')
     destroy = sub.add_parser(
@@ -261,6 +345,10 @@ def main(argv=None):
     args = parse_args(argv)
     manager = Manager(args.project_name)
     try:
+        if args.action == 'backup':
+            # Include lock conflicts and preflight errors in the same audit as dump failures.
+            manager.backup(source=args.source, prepare=True)
+            return 0
         with nullcontext() if args.action in ('status', 'logs', 'doctor') else operation_lock():
             manager.preflight()
             if args.action in ('start', 'update'):
@@ -278,11 +366,9 @@ def main(argv=None):
                 elif args.action == 'doctor':
                     manager.diagnostics()
                     manager.verify()
-                elif args.action == 'backup':
-                    manager.backup()
                 elif args.action == 'destroy':
                     manager.compose('up', '-d', '--wait', 'db')
-                    manager.backup()  # Failure aborts deletion. Host backups and .env are retained.
+                    manager.backup(source='destroy')  # Failure aborts deletion.
                     manager.compose('down', '--volumes')
             return 0
     except (OperationError, OSError, subprocess.SubprocessError) as error:
@@ -307,4 +393,9 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
+
+    def terminate(signum, frame):
+        raise InterruptedError('Backup or management operation terminated by SIGTERM')
+
+    signal.signal(signal.SIGTERM, terminate)
     sys.exit(main())
