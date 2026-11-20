@@ -318,6 +318,25 @@ def parse_args(argv=None):
     )
     logs = sub.add_parser('logs', help='Show recent logs')
     logs.add_argument('--follow', action='store_true')
+    schedule = sub.add_parser('schedule', help='Manage a Linux systemd backup timer')
+    schedule_commands = schedule.add_subparsers(dest='schedule_action', required=True)
+    install = schedule_commands.add_parser(
+        'install', help='Test backup, install, and enable the timer'
+    )
+    install.add_argument(
+        '--user', required=True, help='Existing deployment account with Docker access'
+    )
+    install.add_argument('--at', default='03:00', help='Daily HH:MM (default 03:00)')
+    install.add_argument(
+        '--timezone', default='Europe/Berlin', help='IANA timezone (default Europe/Berlin)'
+    )
+    install.add_argument(
+        '--dry-run', action='store_true', help='Preview units without changing the host'
+    )
+    schedule_commands.add_parser('status', help='Show the timer and last service result')
+    schedule_commands.add_parser(
+        'disable', help='Disable future runs; retain units, backups, and logs'
+    )
     destroy = sub.add_parser(
         'destroy', help='Back up DB, then delete containers AND project volumes'
     )
@@ -343,6 +362,10 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.action == 'schedule':
+        from backup_schedule import handle
+
+        return handle(ROOT, args.project_name, args)
     manager = Manager(args.project_name)
     try:
         if args.action == 'backup':

@@ -1,0 +1,16 @@
+# Automatic setup: manage.py schedule install generates this timer with your settings.
+# Manual setup: set OnCalendar's time/timezone and match Unit to the service filename.
+# Install as /etc/systemd/system/menu-backup.timer after preparing the service.
+# Then run: sudo systemctl daemon-reload && sudo systemctl enable --now menu-backup.timer
+
+[Unit]
+Description=Daily menu database backup
+
+[Timer]
+# Example schedule: 03:00 Europe/Berlin. Change to the required time and zone.
+OnCalendar=*-*-* 03:00:00 Europe/Berlin
+Persistent=true
+Unit=menu-backup.service
+
+[Install]
+WantedBy=timers.target

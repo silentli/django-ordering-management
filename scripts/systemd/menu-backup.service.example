@@ -1,0 +1,26 @@
+# Automatic setup: sudo python3 scripts/manage.py schedule install --user DEPLOY_USER
+# Manual setup: change User and both project paths below; the user needs Docker,
+# .env read access, and backup-directory write access. For a custom Compose project,
+# add --project-name NAME before backup in ExecStart.
+# Install as /etc/systemd/system/menu-backup.service, paired with menu-backup.timer.
+
+[Unit]
+Description=Menu application PostgreSQL backup
+Requires=docker.service
+After=docker.service
+StartLimitIntervalSec=1h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+# Replace the user and both checkout paths before installation.
+User=menu-deploy
+WorkingDirectory=/opt/django-ordering-management
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 /opt/django-ordering-management/scripts/manage.py backup --source scheduled
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=30min
+Restart=on-failure
+RestartSec=5min
