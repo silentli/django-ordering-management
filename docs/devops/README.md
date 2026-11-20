@@ -1,7 +1,8 @@
 # DevOps overview
 
-Scope: Docker Compose deployment and GitHub Actions CI. Configuration reviewed on
-2026-11-19; running environments and operational procedures remain unverified.
+Scope: Docker Compose deployment and GitHub Actions CI. Local rehearsal evidence:
+[validation record](deployment.md#validation). Production state
+and host schedule activation require target-server verification.
 
 ## Operations entry points
 
@@ -9,7 +10,7 @@ Scope: Docker Compose deployment and GitHub Actions CI. Configuration reviewed o
 | --- | --- |
 | CI workflows, execution environments, permissions, and diagnostics | [Continuous integration](ci.md) |
 | Configure an environment, deploy, release, or assess rollback | [Deployment](deployment.md) |
-| Create a database archive or rehearse restoration | [Backup and restore](backup-and-restore.md) |
+| Run/schedule backups, inspect the shared log, or rehearse restoration | [Backup and restore](backup-and-restore.md) |
 | Check services, inspect logs, or investigate failures | [Maintenance](maintenance.md) |
 
 ## Deployment model
@@ -57,7 +58,7 @@ the database; it does not prove business operations or recovery.
 | TLS and cookies | No TLS listener; secure cookie flags and SSL redirect disabled | Public HTTPS configuration and checks |
 | Secrets | Runtime `.env`; optional root `.env.admin` | Secret ownership, access, and recovery location |
 | Data | Database, static, and media volumes | Actual volume names, size, and storage location |
-| Backups | Host script dumps DB before update/deletion; no scheduler | Offsite destination, retention, restore evidence |
+| Backups | Shared log; manual/pre-release dumps; optional systemd timer or cron | Host schedule activation, offsite destination, retention, restore evidence |
 | Releases | Host script builds, backs up, and replaces services; no CI deployment | Source selection, recovery plan, and responsibility |
 | Monitoring | Container healthchecks and health route | External checks, alerts, response responsibility |
 

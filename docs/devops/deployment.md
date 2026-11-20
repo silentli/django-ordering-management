@@ -47,6 +47,9 @@ on the host; application dependencies run in containers.
 | `logs --follow` | Follow recent service logs; Ctrl+C stops following |
 | `doctor` | Show status/logs and run application checks |
 | `backup` | Create and inspect a database archive |
+| `schedule install --user USER` | Test backup, install and enable a Linux systemd timer; requires sudo |
+| `schedule status` | Show the timer and last service result |
+| `schedule disable` | Disable future timer activations; requires sudo |
 | `destroy --confirm docker` | Back up the database, then remove containers and volumes |
 
 The default Compose project name is **docker**, matching direct commands using
@@ -55,8 +58,12 @@ before the command and keep it consistent. A different name selects different
 containers and volumes; separate installations also need separate configuration
 and nonconflicting ports.
 
-Mutating script commands are locked against overlap within one checkout. Direct
-Compose commands and operations from other checkouts are not covered by this lock.
+Application lifecycle and standalone backup commands share a checkout lock.
+Timer configuration, direct Compose, and other checkouts are outside that lock.
+
+Manual and scheduled backups share `data/backups/backup.log`, including backups
+before updates/deletion. See [backup logging and scheduling](backup-and-restore.md#shared-backup-log)
+for the systemd installer and cron alternative; schedules are not installed by `start`.
 
 ## First deployment
 
@@ -200,14 +207,20 @@ reversal or replacement requires a verified backup and an explicit recovery plan
 that accounts for lost writes. The [isolated restore exercise](backup-and-restore.md#isolated-restore-exercise)
 is not a production cutover procedure.
 
-## Validation and remaining work
+## Validation
 
-An isolated Docker Desktop rehearsal on 2026-11-19 verified first setup, repeated
-start, stop/resume, container recreation, update/backup, and confirmed volume deletion.
-Credentials and twelve menu items persisted until explicit deletion; a rehearsal
-dump restored those records in a separate PostgreSQL container. Application and
-host-script tests also passed on Linux Python 3.12 on 2026-11-20.
+| Check | Local evidence |
+| --- | --- |
+| Lifecycle, 2026-11-19 | Isolated Docker Desktop setup, resume, recreation, update, confirmed deletion; credentials/data persisted |
+| Application and host-script tests, 2026-11-20 | Passed on Linux Python 3.12 |
+| Backup audit, 2026-11-20 | Manual/scheduled success and failure share a private log; isolated PostgreSQL 14 archive restored |
+| Timer configuration, 2026-11-20 | Generated units passed Linux systemd 249 validation; no host activation |
 
-Native Linux host provisioning, public HTTPS, and production cutover/rollback remain
-unverified. Complete the host inventory, configure TLS and database access restrictions,
-retain release images, and rehearse production recovery before public deployment.
+## Limitations and improvements
+
+- **Production readiness:** Native Linux provisioning and public HTTPS remain
+  unverified. Complete the host inventory and verify TLS and database restrictions.
+- **Release reproducibility:** Retain release images; source rebuilds use mutable
+  base tags and unpinned transitive dependencies.
+- **Recovery:** Production cutover and rollback remain unverified. Rehearse the
+  recovery plan before public deployment.

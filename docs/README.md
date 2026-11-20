@@ -3,7 +3,7 @@
 ## Engineering status
 
 Implementation status reflects the source. Local validation is recorded in
-[Deployment](devops/deployment.md#validation-and-remaining-work); current GitHub
+[Deployment](devops/deployment.md#validation); current GitHub
 Actions results and production environments require separate verification.
 
 ### Development
@@ -23,7 +23,7 @@ Actions results and production environments require separate verification.
 | Continuous integration | Implemented | Workflow results and external investigation runner/runtime unverified |
 | Release delivery | Partial | Host management script available; source selection and rollback remain manual |
 | Public deployment | Partial | TLS, secure cookies, and database exposure require environment-specific configuration |
-| Backup automation | Partial | Database dump before updates/deletion; scheduling, retention, offsite copies and recovery pending |
+| Backup automation | Partial | Shared audit log and timer installer; host activation, retention, offsite copies and recovery pending |
 | Monitoring | Partial | Container checks implemented; external availability checks and alerting absent from repository |
 | Environment inventory | Unknown | Host, domain, deployed revision, resource ownership, and runtime state not established |
 
@@ -78,7 +78,7 @@ Selected source, configuration, and documentation paths:
 | Infrastructure | [DevOps overview](devops/README.md) | Service topology, storage boundaries, environment configuration |
 | Continuous integration | [CI](devops/ci.md) | Workflows, triggers, execution environments, permissions, diagnostics |
 | Releases | [Deployment](devops/deployment.md) | Initial setup, configuration, rollout, verification, rollback constraints |
-| Data protection | [Backup and restore](devops/backup-and-restore.md) | Database archives, isolated restoration, recovery limitations |
+| Data protection | [Backup and restore](devops/backup-and-restore.md) | Manual/scheduled backups, shared log, isolated restore, recovery limitations |
 | Operations | [Maintenance](devops/maintenance.md) | Diagnostics, incident triage, recurring maintenance |
 | CI tooling | [Acceptance packages](../ci_acceptance/README.md) | Isolated packaging contracts and execution boundaries |
 

@@ -45,7 +45,9 @@ Preserve logs before replacing services. Follow the relevant symptom below:
 | Healthy endpoint but failed page | Database-backed request and Web logs | `/health/` does not query the database |
 | Database unhealthy | DB logs, initialized role, disk space | Healthcheck uses the configured role; changing `.env` does not modify existing roles |
 | Empty database after a move | Compose project name and attached volumes | Locate the original volumes before any initialization or recovery |
-| Backup missing | `data/backups/`, actual host scheduler and destination | Script backups run on demand and before update/deletion; no recurring job is configured |
+| Backup missing or failed | [Shared backup log](backup-and-restore.md#shared-backup-log), disk space | Check the last success, failure stage, and archive path |
+| Scheduled backup absent | `schedule status`, service journal, due time/timezone | Confirm activation and execution account; installer probe success is not a timed run |
+| Backup log has only `started` | Service state, journal, `.partial` files | Check interruption/timeout; verify archive integrity before cleanup |
 
 A Web restart executes migrations and is not a neutral diagnostic action. For
 data or schema damage, preserve volumes and follow the recovery constraints in

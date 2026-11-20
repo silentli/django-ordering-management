@@ -37,7 +37,7 @@ exits successfully. Open the [customer menu](http://localhost/menu/) or
 [staff login](http://localhost/staff/login/).
 
 See the [management commands](docs/devops/deployment.md#automated-host-management)
-for stop, update, backup, diagnostics, and removal.
+for stop, update, backup scheduling, diagnostics, and removal.
 
 This starts the production settings profile with the repository's HTTP configuration.
 Public deployment requires the environment checks in the
@@ -52,5 +52,5 @@ Public deployment requires the environment checks in the
 | [DevOps](docs/devops/README.md) | Deployment topology, persistent storage, environment status |
 | [CI](docs/devops/ci.md) | Workflows, triggers, runners, permissions, failure diagnostics |
 | [Deployment](docs/devops/deployment.md) | Configuration, provisioning, release verification, rollback |
-| [Backup and restore](docs/devops/backup-and-restore.md) | Database archives, restore validation, recovery coverage |
+| [Backup and restore](docs/devops/backup-and-restore.md) | Manual/scheduled backups, shared log, restore validation |
 | [Maintenance](docs/devops/maintenance.md) | Service diagnostics, incident triage, recurring checks |

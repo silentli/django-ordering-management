@@ -1,91 +1,150 @@
 # Backup and restore
 
-Scope: backup of the Compose PostgreSQL database and an isolated restore exercise.
-Production recovery remains unverified.
+Run commands from the repository root on the Docker host. Examples use Compose
+project `docker`; for another project, place `--project-name NAME` before the command.
 
-## Current coverage and constraints
+## Backup contract
 
-The [host management script](deployment.md#automated-host-management) backs up the
-database on demand and before updates or volume deletion. A sample archive passed
-an isolated restore; see the [validation record](deployment.md#validation-and-remaining-work).
-No recurring schedule, retention policy, or offsite destination is configured.
+| Item | Configuration |
+| --- | --- |
+| Engine | PostgreSQL `pg_dump -Fc`; logical backup of one database |
+| Included | Schema and data, including Django users/password hashes |
+| Excluded | Cluster roles, `.env`, media, host configuration, writes after the snapshot |
+| Archives | `data/backups/PROJECT-UTC_TIMESTAMP-RANDOM.dump`, mode `600` |
+| Shared log | `data/backups/backup.log`, JSON Lines, UTC timestamps, mode `600` |
+| Trigger | Manual, systemd/cron, or before `update`/`destroy` |
+| Verification | Nonempty archive and successful `pg_restore --list` |
+| Retention / offsite / alerts | Not configured |
 
-A custom-format `pg_dump` archive includes one database's schema and data. It does
-not include cluster roles, runtime secrets, uploaded media, host configuration,
-or changes committed after the dump's consistent snapshot. A complete recovery plan
-must cover those separately and define acceptable data loss and recovery time.
+Archive inspection does not prove restoration. A sample archive passed an isolated
+restore; see [validation](deployment.md#validation). Production
+recovery remains unverified.
 
 ## Scripted database backup
 
-With the database running, execute from the repository root:
+Requires Docker access, a readable runtime `.env`, a running database container,
+and write access to the checkout/backups.
 
 ```sh
 python3 scripts/manage.py backup
 ```
 
-For another Compose project, put `--project-name NAME` before `backup`.
-The script writes a custom-format archive to `data/backups/`, named with the project,
-UTC timestamp, and random suffix. Files use mode `600`; only a nonempty dump whose
-directory passes `pg_restore --list` is published. Failed attempts remove the
-temporary file and return nonzero. `update` and `destroy` abort if this step fails.
+Execution: `log started → lock → Docker/config checks → pg_dump to .partial →
+archive inspection → publish .dump → log success`.
 
-Keep the reported archive path with its source revision, database, image identity,
-and timestamp. Archive listing checks readability, not complete restoration.
-Copy archives to protected offsite storage; local host backups do not cover host loss.
+- Dump/check failures return nonzero, log the stage/error, and remove partial dumps.
+- `update` and `destroy` prepare the database and require backup success before proceeding.
+- Use this entry point for manual work; direct `pg_dump` bypasses the shared log.
+- Record source database, commit, and PostgreSQL image alongside retained archives.
 
-## Manual database backup
-
-Execution location: target host, repository root. Required access: Docker and a
-private writable backup directory. The `db` service must be running with its
-expected `POSTGRES_USER` and `POSTGRES_DB`. Confirm the Compose project identity
-before execution. The database remains online; the dump adds database and I/O load.
-The Compose examples use the default project `docker`; add `--project-name NAME`
-for a custom project.
-
-Set `backup_dir` to an approved absolute host path outside the checkout. The following
-POSIX shell block writes a private temporary file and publishes it only after archive
-inspection succeeds:
+## Shared backup log
 
 ```sh
-(
-    set -eu
-    umask 077
-    backup_dir='/REPLACE_WITH_APPROVED_ABSOLUTE_BACKUP_DIRECTORY'
-    test -d "$backup_dir"
-    test -w "$backup_dir"
-    backup_tmp=$(mktemp "$backup_dir/menu-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
-    trap 'rm -f "$backup_tmp"' EXIT
-    docker compose -f docker/docker-compose.yml exec -T db sh -ec \
-        'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$backup_tmp"
-    test -s "$backup_tmp"
-    docker compose -f docker/docker-compose.yml exec -T db \
-        pg_restore --list < "$backup_tmp" > /dev/null
-    backup_file="$backup_tmp.dump"
-    mv "$backup_tmp" "$backup_file"
-    trap - EXIT
-    printf 'Backup archive: %s\n' "$backup_file"
-)
+tail -n 20 data/backups/backup.log
 ```
 
-Expected result: exit status `0` and a nonempty `.dump` file with private permissions.
-On failure, no completed archive is published and the temporary file is removed.
-Check database availability, permissions, available storage, and the reported error
-before retrying. Existing completed archives remain unchanged.
+| Fields | Meaning |
+| --- | --- |
+| `timestamp`, `run_id`, `project` | UTC event time, attempt identifier, Compose project |
+| `source` | `manual`, `scheduled`, `update`, or `destroy` |
+| `status` | `started`, then `success` or `failed` |
+| `archive` | Final/intended archive path, once assigned |
+| `bytes`, `duration_seconds` | Size on success; elapsed time on completion |
+| `stage`, `error`, `error_type` | Failure location and diagnostic |
 
-Archive listing verifies that the archive directory can be read. It does not prove
-that all contents can be restored. Record the UTC backup time, source environment,
-database, application revision, PostgreSQL image identity, size, and storage location.
-Treat the archive as sensitive production data.
+The same records reach terminal/scheduler output. Standalone attempts also record
+lock conflicts, configuration errors, and Docker failures.
+
+| Condition | Behavior |
+| --- | --- |
+| Checkout lock busy | Fail; no concurrent dump |
+| Log cannot be opened | Fail before starting a dump |
+| Completion log write fails | Fail; completed archive may remain; update/deletion is blocked |
+| SIGTERM / Ctrl+C | Normally log failure and clean partial dump |
+| Power loss / SIGKILL | May leave `started` without completion and a `.partial` file |
+
+Check terminal/journal output if the log is unavailable. Monitor disk usage;
+archives and log records have no automatic retention or rotation.
+
+## Daily scheduling on Linux
+
+| Component | Responsibility |
+| --- | --- |
+| `scripts/manage.py` | Administrator CLI and actual backup entry point |
+| `scripts/backup_schedule.py` | Generate, validate, install, inspect, and disable systemd configuration |
+| `.timer` / `.service` | Linux triggers `manage.py backup --source scheduled` at the scheduled time |
+
+Use one scheduler per installation. `start` does not enable a schedule.
+
+### systemd timer
+
+Prerequisites:
+
+- Linux with systemd, rootful Docker, Python 3.10+, and util-linux `runuser`.
+- Persistent checkout and existing deployment account with Docker access,
+  `.env` read access, and checkout/backups write access.
+- Running application/database; installed timezone data for named zones.
+- Disable older manual `menu-backup.timer` or cron entries first.
+
+Preview, then install as root. Examples use the current shell account (`$USER`);
+set `--user` explicitly if the deployment account differs:
+
+```sh
+python3 scripts/manage.py schedule install --user "$USER" --dry-run
+sudo /usr/bin/python3 scripts/manage.py schedule install \
+  --user "$USER" --at 03:00 --timezone Europe/Berlin
+```
+
+| Setting | Value / behavior |
+| --- | --- |
+| Default calendar | Daily `03:00 Europe/Berlin`; override `--at` and `--timezone` |
+| Generated units | `/etc/systemd/system/menu-backup-PROJECT.service` and `.timer` |
+| Backup execution | Service `User=` is `--user`; installation uses sudo |
+| Catch-up | `Persistent=true` for missed timer activations |
+| Failure retry | `RestartSec=5min`; `StartLimitBurst=3`, `StartLimitIntervalSec=1h` |
+| Attempt timeout | `TimeoutStartSec=30min` |
+| Preview | `--dry-run`: no writes, backup probe, or activation |
+
+Installation: `render → validate → real backup as --user → write units → reload → enable`.
+Validation/probe failure prevents installation. Reinstall updates the same checkout;
+foreign/manual units are refused. Users, Docker permissions, and the application
+are not provisioned. Activation failure may leave unit files; inspect status/journal
+before retrying.
+
+```sh
+python3 scripts/manage.py schedule status
+journalctl -u menu-backup-docker.service -n 50 --no-pager
+sudo /usr/bin/python3 scripts/manage.py schedule disable
+```
+
+- Check a `success` timestamp after the timer's due time against the journal.
+  The install probe also logs `source=scheduled`; it does not prove a timer activation.
+- `schedule disable` stops future timer activations; units, logs, and manual backup remain.
+- Active jobs and service retries continue. Cancel them explicitly with
+  `sudo systemctl stop menu-backup-docker.service` when required.
+- Templates in `scripts/systemd/` support manual installation; their comments identify
+  editable fields. Rootless Docker requires custom context/dependency configuration.
+
+### Cron alternative
+
+Use `crontab -e` as the deployment account. Adjust the absolute checkout path:
+
+```cron
+0 3 * * * /usr/bin/python3 /opt/django-ordering-management/scripts/manage.py backup --source scheduled
+```
+
+Uses the cron daemon's timezone; no retry/catch-up is configured here. Test the
+command as that account, then check the next scheduled result in `backup.log`.
+Do not enable both cron and the systemd timer.
 
 ## Isolated restore exercise
 
-Execution location: a Docker host approved to hold the source data. Required access:
-Docker and a readable backup archive. This exercise uses a new container with no
-network or production volume attached. It must not target the running `db` service.
+Requires Docker access and a readable archive on a host approved to hold the data.
+Use a disposable container with no network or production volume attached; never
+target the running `db` service.
 
-Run these steps in the same POSIX shell session. Replace `backup_file` with a
-completed archive. Use a PostgreSQL 14 image approved for the environment; prefer
-the source database's recorded image digest when available.
+Run in one POSIX shell session; stop on any nonzero result. Set `backup_file` and
+use a PostgreSQL 14 image matching the source, preferably its recorded digest.
 
 ```sh
 backup_file='/REPLACE_WITH_COMPLETED_ARCHIVE.dump'
@@ -96,18 +155,15 @@ docker run -d --name "$restore_container" --network none \
     -e POSTGRES_DB=restore_check postgres:14
 ```
 
-Stop if archive selection or container creation fails. Trust authentication is
-limited to this disposable container with no network access; it is not a production
-configuration. Wait for readiness:
+Trust authentication is limited to this network-isolated test container. Wait for
+TCP readiness, retrying for up to 60 seconds; inspect logs and stop if unavailable:
 
 ```sh
 docker exec "$restore_container" pg_isready -h 127.0.0.1 -U postgres -d restore_check
 ```
 
-The TCP check waits for the final server rather than the temporary initialization
-server. Repeat it after a short interval if startup is still in progress.
-If readiness does not succeed within 60 seconds, inspect the container logs and
-stop the exercise. Once ready, restore:
+TCP readiness avoids mistaking the temporary initialization server for the final
+server. Restore only after it succeeds:
 
 ```sh
 docker exec -i "$restore_container" pg_restore \
@@ -131,8 +187,7 @@ migration records are present. Check representative row counts and relationships
 against a recorded baseline, without copying sensitive records into shared logs.
 Record the archive, PostgreSQL image, elapsed time, checks, and result.
 
-After recording results, remove only the disposable exercise container and its
-anonymous database volume:
+After recording results, remove only the test container and its anonymous volume:
 
 ```sh
 docker rm -v -f "$restore_container"
@@ -145,13 +200,11 @@ replacement is specified here.
 
 ## Limitations and improvements
 
-- **Recovery validation:** Rehearse with actual release backups, configuration, media,
-  and application checks; retain the results. The sample restore does not cover these.
-- **Scheduling:** Script backups are on demand and before updates/deletion. Configure
-  and verify a scheduled run; no recurring backup job is installed.
-- **Offsite storage and retention:** No policy is defined. Configure encrypted
-  separate storage and retention; verify archive retrieval.
-- **Recovery coverage:** Database archives omit media, configuration, and cluster
-  roles. Protect these separately and document full application recovery.
-- **Recovery objectives and alerts:** Acceptable data loss, recovery time, and failure
-  notification are undefined. Agree on targets and test backup failure alerts.
+- **Retention and offsite storage:** No policy is configured. Define retention,
+  encrypted offsite copies, and retrieval checks.
+- **Recovery coverage:** Database dumps omit configuration, roles, and media.
+  Protect these separately and rehearse full application recovery.
+- **Monitoring:** No backup alerts are configured. Monitor failed attempts,
+  missing recent successes, and disk pressure.
+- **Recovery objectives:** Acceptable data loss and recovery time are undefined.
+  Agree targets and validate them against actual release backups.
