@@ -6,18 +6,31 @@ with Docker access.
 
 ## Status and logs
 
+| Command | Purpose |
+| --- | --- |
+| `status` | Container state, health, and ports |
+| `logs [-f]` | Recent logs; `-f` streams until Ctrl+C |
+| `diagnose` | Deployment configuration, Docker, status/logs, and application checks |
+
 ```sh
 python3 scripts/manage.py status
 python3 scripts/manage.py logs
+python3 scripts/manage.py diagnose
+```
+
+`diagnose` checks `.env.deploy` when present; `--config PATH` selects another file.
+Application checks require running Web and Nginx services. Failures return nonzero;
+diagnosis does not modify configuration, restart services, or apply migrations.
+Keep the same `--project-name NAME` for all operations.
+
+For focused inspection:
+
+```sh
 docker compose -f docker/docker-compose.yml exec -T nginx nginx -t
 docker compose -f docker/docker-compose.yml exec -T web python manage.py showmigrations --plan
 df -h
 docker system df
 ```
-
-`python3 scripts/manage.py doctor` combines status, recent logs, and application
-checks. It requires running Web and Nginx services. For a custom Compose project,
-use the same `--project-name NAME` on script and direct Compose commands.
 
 Expected state: `db` and `web` are healthy, `nginx` is running, and `collect-static`
 has exited with code `0`. `init-admin` may be absent because it is an optional task.

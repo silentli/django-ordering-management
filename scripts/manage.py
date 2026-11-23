@@ -167,6 +167,39 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
             except (OSError, subprocess.CalledProcessError):
                 LOGGER.warning('Docker diagnostic command unavailable: %s', args[0])
 
+    def diagnose(self, config_path=None):
+        from deploy_config import ConfigurationError, load_config
+
+        failed = False
+        path = config_path if config_path is not None else ROOT / '.env.deploy'
+        if config_path is not None or path.exists():
+            try:
+                load_config(path)
+                LOGGER.info('Deployment configuration syntax is valid: %s', path)
+            except ConfigurationError as error:
+                LOGGER.error('%s', error)
+                failed = True
+        else:
+            LOGGER.info('No deployment file at %s; checking the existing application.', path)
+        try:
+            self.preflight()
+        except (OperationError, OSError, subprocess.SubprocessError) as error:
+            LOGGER.error('Docker preflight failed: %s', error)
+            return 1
+        self.diagnostics()
+        try:
+            self.require_env()
+            self.verify()
+        except (OperationError, OSError, subprocess.SubprocessError) as error:
+            detail = (
+                f'Command failed (exit {error.returncode}).'
+                if isinstance(error, subprocess.CalledProcessError)
+                else str(error)
+            )
+            LOGGER.error('Application checks failed: %s', detail)
+            failed = True
+        return 1 if failed else 0
+
     @contextmanager
     def backup_record(self, source):
         record = {'run_id': secrets.token_hex(8), 'project': self.project, 'source': source}
@@ -263,7 +296,8 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
         return path
 
     def start(self, args, update=False):
-        self.prepare_env(args.hosts)
+        if not update:
+            self.prepare_env(args.hosts)
         self.require_env()
         if update:
             # Build failure leaves the running release untouched.
@@ -282,19 +316,22 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            'Lifecycle: start, update, stop, down, destroy\n'
+            'Inspection: status, logs, diagnose\n'
+            'Data protection: backup, schedule\n'
+            'Use COMMAND --help for options. --project-name may appear before or after a command.'
+        ),
+    )
     parser.add_argument(
         '--project-name',
         default='docker',
         help='Compose identity; default docker preserves the existing stack/volumes',
     )
     sub = parser.add_subparsers(dest='action', required=True)
-    config = sub.add_parser('config', help='Inspect deployment configuration without host changes')
-    config_commands = config.add_subparsers(dest='config_action', required=True)
-    check = config_commands.add_parser('check', help='Validate deployment parameter syntax')
-    check.add_argument(
-        '--file', type=Path, help='Deployment file; default: .env.deploy in the repository root'
-    )
     for action in ('start', 'update'):
         command = sub.add_parser(
             action,
@@ -302,11 +339,12 @@ def parse_args(argv=None):
             if action == 'start'
             else 'Build, back up DB, and deploy this checkout',
         )
-        command.add_argument(
-            '--hosts',
-            default='localhost,127.0.0.1',
-            help='ALLOWED_HOSTS for a NEW .env only; existing files are preserved',
-        )
+        if action == 'start':
+            command.add_argument(
+                '--hosts',
+                default='localhost,127.0.0.1',
+                help='ALLOWED_HOSTS for a NEW .env only; existing files are preserved',
+            )
         command.add_argument(
             '--no-seed',
             action='store_true',
@@ -316,17 +354,25 @@ def parse_args(argv=None):
         'stop', help='Stop services; keep containers and data (pause service availability)'
     )
     sub.add_parser('down', help='Remove containers and network; retain all persistent volumes')
-    sub.add_parser('status', help='Show container state')
-    sub.add_parser('doctor', help='Show status/logs and verify the application')
+    sub.add_parser('status', help='Show container health and ports without application checks')
+    diagnose = sub.add_parser(
+        'diagnose', help='Check configuration, Docker and the running application'
+    )
+    diagnose.add_argument(
+        '--config',
+        type=Path,
+        metavar='PATH',
+        help='Deployment file; default: repository .env.deploy if present',
+    )
     backup = sub.add_parser('backup', help='Create and inspect a private PostgreSQL dump')
     backup.add_argument(
         '--source',
         choices=('manual', 'scheduled'),
         default='manual',
-        help='Origin recorded in data/backups/backup.log',
+        help=argparse.SUPPRESS,  # Internal timer/cron audit metadata.
     )
     logs = sub.add_parser('logs', help='Show recent logs')
-    logs.add_argument('--follow', action='store_true')
+    logs.add_argument('-f', '--follow', action='store_true', help='Stream logs until interrupted')
     schedule = sub.add_parser('schedule', help='Manage a Linux systemd backup timer')
     schedule_commands = schedule.add_subparsers(dest='schedule_action', required=True)
     install = schedule_commands.add_parser(
@@ -355,12 +401,18 @@ def parse_args(argv=None):
         metavar='PROJECT_NAME',
         help='Must exactly match --project-name; no interactive default',
     )
+    # Suppressed defaults preserve a project supplied before the subcommand.
+    for command in [*sub.choices.values(), *schedule_commands.choices.values()]:
+        command.add_argument(
+            '--project-name',
+            default=argparse.SUPPRESS,
+            metavar='NAME',
+            help='Compose project name (default: docker)',
+        )
     args = parser.parse_args(argv)
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', args.project_name):
         parser.error('project-name must contain lowercase letters, digits, underscores or hyphens')
-    if args.action in ('start', 'update') and not re.fullmatch(
-        r'[A-Za-z0-9.,*:\[\]-]+', args.hosts
-    ):
+    if args.action == 'start' and not re.fullmatch(r'[A-Za-z0-9.,*:\[\]-]+', args.hosts):
         parser.error(
             'hosts must be comma-separated hostnames/IP addresses, without spaces or schemes'
         )
@@ -369,41 +421,22 @@ def parse_args(argv=None):
     return args
 
 
-def check_deploy_config(args):
-    from deploy_config import ConfigurationError, load_config
-
-    path = args.file if args.file is not None else ROOT / '.env.deploy'
-    try:
-        config = load_config(path)
-    except ConfigurationError as error:
-        LOGGER.error('%s', error)
-        return 1
-    except KeyboardInterrupt:
-        LOGGER.warning('Configuration check interrupted; no changes were made.')
-        return 130
-    # Command results belong on stdout; diagnostic logs go to stderr.
-    json.dump(config.values(), sys.stdout, indent=2)
-    sys.stdout.write('\n')
-    LOGGER.info('Deployment configuration syntax is valid.')
-    return 0
-
-
 def main(argv=None):
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     args = parse_args(argv)
-    if args.action == 'config':
-        return check_deploy_config(args)
     if args.action == 'schedule':
         from backup_schedule import handle
 
         return handle(ROOT, args.project_name, args)
     manager = Manager(args.project_name)
     try:
+        if args.action == 'diagnose':
+            return manager.diagnose(args.config)
         if args.action == 'backup':
             # Include lock conflicts and preflight errors in the same audit as dump failures.
             manager.backup(source=args.source, prepare=True)
             return 0
-        with nullcontext() if args.action in ('status', 'logs', 'doctor') else operation_lock():
+        with nullcontext() if args.action in ('status', 'logs') else operation_lock():
             manager.preflight()
             if args.action in ('start', 'update'):
                 manager.start(args, update=args.action == 'update')
@@ -417,9 +450,6 @@ def main(argv=None):
                     manager.compose('ps', '-a')
                 elif args.action == 'logs':
                     manager.compose('logs', '--tail=100', *(['--follow'] if args.follow else []))
-                elif args.action == 'doctor':
-                    manager.diagnostics()
-                    manager.verify()
                 elif args.action == 'destroy':
                     manager.compose('up', '-d', '--wait', 'db')
                     manager.backup(source='destroy')  # Failure aborts deletion.

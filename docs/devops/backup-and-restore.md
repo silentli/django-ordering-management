@@ -1,7 +1,8 @@
 # Backup and restore
 
 Run commands from the repository root on the Docker host. Examples use Compose
-project `docker`; for another project, place `--project-name NAME` before the command.
+project `docker`. Management commands accept `--project-name NAME` before or after
+the subcommand; direct Compose commands require it before the operation.
 
 ## Backup contract
 

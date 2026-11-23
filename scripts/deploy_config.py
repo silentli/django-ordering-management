@@ -45,7 +45,7 @@ def read_values(path):
     except FileNotFoundError as error:
         raise ConfigurationError(
             f'Deployment file not found: {path}. Copy docker/deploy.env.example to .env.deploy '
-            'or select a file with --file.'
+            'or select a file with diagnose --config PATH.'
         ) from error
     except IsADirectoryError as error:
         raise ConfigurationError(f'Deployment configuration must be a file: {path}') from error

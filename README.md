@@ -23,6 +23,8 @@ the Python standard library.
 ```sh
 git clone https://github.com/silentli/menu-management-demo.git
 cd menu-management-demo
+mkdir -p runtime/nginx/conf.d
+cp -n nginx/templates/http.conf runtime/nginx/conf.d/site.conf
 python3 scripts/manage.py start
 ```
 
@@ -37,7 +39,7 @@ exits successfully. Open the [customer menu](http://localhost/menu/) or
 [staff login](http://localhost/staff/login/).
 
 See the [management commands](docs/devops/deployment.md#automated-host-management)
-for stop, update, backup scheduling, diagnostics, and removal.
+for start/update, stop/removal, status/logs, diagnosis, and backup scheduling.
 
 This starts the production settings profile with the repository's HTTP configuration.
 Public deployment requires the environment checks in the

@@ -1,18 +1,19 @@
 # Deployment
 
 Run commands from the repository root on the Docker host. The default stack uses
-HTTP; public deployment requires the configuration below.
+HTTP; public deployment also requires TLS termination, secure
+cookies, and restricted database exposure.
 
 ## Preconditions and configuration
 
 - Linux host with Git, Python 3.10+, Docker, and Docker Compose 2.24.0+.
-- Docker access, a writable checkout, and available host ports `80` and `5432`.
+- Docker access, a writable checkout, and available host ports `80`, `443`, and `5432`.
 - For an existing deployment: its Compose project name, runtime configuration,
   source revision, image identities, and persistent volumes.
-- For public access: DNS, TLS termination, secure cookie settings, and restricted
-  database exposure. The script does not configure these.
+- For public access: a public IP or domain, TLS termination, secure cookie settings,
+  and restricted database exposure. The script does not configure these.
 
-The runtime file is `menu_management/settings/env/.env`. The management script
+The application runtime file is `menu_management/settings/env/.env`. The management script
 creates it on first start if absent; existing files are preserved.
 
 | Key | Purpose / value |
@@ -32,6 +33,25 @@ existing data volume. Changing `STAFF_PASSWORD` takes effect after container
 recreation; successful staff login then synchronizes the `staff` user's password.
 Django superuser credentials are managed separately.
 
+### Deployment parameters
+
+`docker/deploy.env.example` describes deployment inputs separately from application
+credentials. Prepare a local deployment file:
+
+```sh
+cp -n docker/deploy.env.example .env.deploy
+```
+
+Edit `PUBLIC_HOST` before real deployment. The example IP is documentation-only.
+The `diagnose` command checks deployment parameters alongside Docker and the
+running application. Use `diagnose --config /absolute/path/to/deploy.env` for
+another deployment file; otherwise it checks `.env.deploy` when present.
+File values override built-in defaults; Shell variables do not override them.
+The format supports `KEY=value`, quotes and comments, but no `export`, variable
+expansion or shell commands. Unknown and duplicate keys are rejected.
+
+`ACME_EMAIL` remains an optional unused key and does not configure notifications.
+
 ## Automated host management
 
 Use `python3 scripts/manage.py COMMAND`. Only Python's standard library is needed
@@ -39,24 +59,37 @@ on the host; application dependencies run in containers.
 
 | Command | Behavior |
 | --- | --- |
-| `start` | Prepare configuration, build missing images, start, seed an empty menu, and verify |
+| `start` | Prepare application environment, build missing images, start, seed an empty menu, and verify |
 | `stop` | Stop services; retain containers and data |
 | `down` | Remove containers and network; retain persistent volumes |
 | `update` | Build current source, back up the database, recreate services, and verify |
-| `status` | Show containers, health, and published ports |
-| `logs --follow` | Follow recent service logs; Ctrl+C stops following |
-| `doctor` | Show status/logs and run application checks |
+| `status` | Show container state, health, and ports; no application requests |
+| `logs [-f]` | Show recent logs; `-f` streams until Ctrl+C |
+| `diagnose [--config PATH]` | Check deployment parameters, Docker, status/logs and the running application |
 | `backup` | Create and inspect a database archive |
 | `schedule install --user USER` | Test backup, install and enable a Linux systemd timer; requires sudo |
 | `schedule status` | Show the timer and last service result |
 | `schedule disable` | Disable future timer activations; requires sudo |
 | `destroy --confirm docker` | Back up the database, then remove containers and volumes |
 
+Use `COMMAND --help` for command-specific options. `start --hosts HOSTS` only
+initializes a new application `.env`; `update` requires the existing file and does
+not accept `--hosts`. Both accept `--no-seed`. `logs -f` and `logs --follow` are
+equivalent; ordinary `logs` returns the latest 100 lines.
+
 The default Compose project name is **docker**, matching direct commands using
-`-f docker/docker-compose.yml`. For another project, place `--project-name NAME`
-before the command and keep it consistent. A different name selects different
+`-f docker/docker-compose.yml`. For another project, pass `--project-name NAME`
+before or after the management command; direct Compose commands require it before
+the operation. Keep the project name consistent. A different name selects different
 containers and volumes; separate installations also need separate configuration
 and nonconflicting ports.
+
+For example, these management commands select the same project:
+
+```sh
+python3 scripts/manage.py --project-name staging status
+python3 scripts/manage.py status --project-name staging
+```
 
 Application lifecycle and standalone backup commands share a checkout lock.
 Timer configuration, direct Compose, and other checkouts are outside that lock.
@@ -71,10 +104,16 @@ Clone the repository as shown in the [quick start](../../README.md#quick-start),
 select the intended revision, and run:
 
 ```sh
+mkdir -p runtime/nginx/conf.d
+cp -n nginx/templates/http.conf runtime/nginx/conf.d/site.conf
 python3 scripts/manage.py start
 ```
 
-If configuration is absent and no project volumes exist, the script generates
+The copy initializes plain HTTP only when `site.conf` is absent. Runtime files
+are excluded from Git and Docker build contexts. Preserve an existing active
+configuration; selecting or switching templates is currently manual.
+
+If the application `.env` is absent and no project volumes exist, the script generates
 random Django, database, and staff secrets in a mode-`600` `.env`. It never prints
 those secrets or overwrites existing values. Read `STAFF_PASSWORD` from the file
 to sign in. If volumes exist but `.env` is missing, restore the original file;
@@ -135,16 +174,18 @@ Compose commands as well.
    git switch --detach "$release_ref"
    ```
 
-3. Preserve the runtime file and project name, prepare configuration additions,
-   then deploy:
+3. Preserve the existing application `.env` and project name, prepare configuration
+   additions, then deploy:
 
    ```sh
    python3 scripts/manage.py update
    ```
 
-The script builds first, starts the database if needed, and requires a successful
-[database backup](backup-and-restore.md#scripted-database-backup) before recreating
-services. A failed build leaves running containers unchanged; a failed backup
+`update` stops if the application `.env` is missing; it does not initialize
+credentials. The script builds first, starts the database if needed, and requires
+a successful [database backup](backup-and-restore.md#scripted-database-backup) before recreating
+services. Preserve the active `runtime/nginx/conf.d/site.conf`; updates do not
+generate or switch Nginx configuration. A failed build leaves running containers unchanged; a failed backup
 aborts replacement. Updates also seed an empty menu unless `--no-seed` is supplied.
 
 Recreation can interrupt requests. Static collection clears the shared asset
@@ -173,7 +214,7 @@ when only container removal is intended.
 
 ## Release verification
 
-`start`, `update`, and `doctor` check Django configuration, pending migrations,
+`start`, `update`, and `diagnose` check Django configuration, pending migrations,
 and HTTP responses through Nginx for health, menu, the staff login page, and an admin CSS
 asset. These requests originate inside the stack. Verify the published host port:
 
@@ -192,8 +233,8 @@ customer data.
 
 ## Failure handling and rollback
 
-Failures return nonzero and attempt to display status and recent logs. Use
-`python3 scripts/manage.py doctor` or the [diagnostic commands](maintenance.md#status-and-logs)
+Lifecycle failures return nonzero and attempt to display status and recent logs.
+Use `python3 scripts/manage.py diagnose` or the [diagnostic commands](maintenance.md#status-and-logs)
 to investigate. Correct the first configuration, port, database, or migration error
 before retrying; do not delete volumes as a repair step.
 
@@ -215,6 +256,7 @@ is not a production cutover procedure.
 | Application and host-script tests, 2026-11-20 | Passed on Linux Python 3.12 |
 | Backup audit, 2026-11-20 | Manual/scheduled success and failure share a private log; isolated PostgreSQL 14 archive restored |
 | Timer configuration, 2026-11-20 | Generated units passed Linux systemd 249 validation; no host activation |
+| Deployment parameters, 2026-11-23 | CLI validation rejected invalid files/formats; configuration reading did not modify files |
 
 ## Limitations and improvements
 
