@@ -4,6 +4,7 @@
 import argparse
 import fcntl
 import json
+import logging
 import os
 import re
 import secrets
@@ -17,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = ROOT / 'menu_management/settings/env/.env'
+LOGGER = logging.getLogger(__name__)
 
 
 class OperationError(Exception):
@@ -43,7 +45,8 @@ def write_backup_event(event):
         target.write(line)
         target.flush()
         os.fsync(target.fileno())
-    print(line, end='', flush=True)
+    sys.stdout.write(line)
+    sys.stdout.flush()
 
 
 @contextmanager
@@ -91,7 +94,7 @@ class Manager:
             raise OperationError('Refusing a symlink for the runtime .env file.')
         if ENV.exists():
             ENV.chmod(0o600)
-            print(f'Keeping existing configuration: {ENV}', flush=True)
+            LOGGER.info('Keeping existing configuration: %s', ENV)
             return
         # Refuse to invent credentials for a database that was initialized earlier.
         volumes = subprocess.run(
@@ -123,10 +126,10 @@ class Manager:
         )
         ENV.parent.mkdir(parents=True, exist_ok=True)
         private_write(ENV, content)
-        print(
-            f'Created private configuration: {ENV}\n'
-            'Read STAFF_PASSWORD from that file to sign in; passwords are not printed.',
-            flush=True,
+        LOGGER.info(
+            'Created private configuration: %s. '
+            'Read STAFF_PASSWORD from that file to sign in; passwords are not logged.',
+            ENV,
         )
 
     def require_env(self):
@@ -162,7 +165,7 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
             try:
                 self.compose(*args)
             except (OSError, subprocess.CalledProcessError):
-                pass
+                LOGGER.warning('Docker diagnostic command unavailable: %s', args[0])
 
     @contextmanager
     def backup_record(self, source):
@@ -194,7 +197,7 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
                     }
                 )
             except OSError as log_error:
-                print(f'Cannot record backup failure: {log_error}', file=sys.stderr)
+                LOGGER.error('Cannot record backup failure: %s', log_error)
             raise
         else:
             write_backup_event(
@@ -286,6 +289,12 @@ def parse_args(argv=None):
         help='Compose identity; default docker preserves the existing stack/volumes',
     )
     sub = parser.add_subparsers(dest='action', required=True)
+    config = sub.add_parser('config', help='Inspect deployment configuration without host changes')
+    config_commands = config.add_subparsers(dest='config_action', required=True)
+    check = config_commands.add_parser('check', help='Validate deployment parameter syntax')
+    check.add_argument(
+        '--file', type=Path, help='Deployment file; default: .env.deploy in the repository root'
+    )
     for action in ('start', 'update'):
         command = sub.add_parser(
             action,
@@ -360,8 +369,30 @@ def parse_args(argv=None):
     return args
 
 
+def check_deploy_config(args):
+    from deploy_config import ConfigurationError, load_config
+
+    path = args.file if args.file is not None else ROOT / '.env.deploy'
+    try:
+        config = load_config(path)
+    except ConfigurationError as error:
+        LOGGER.error('%s', error)
+        return 1
+    except KeyboardInterrupt:
+        LOGGER.warning('Configuration check interrupted; no changes were made.')
+        return 130
+    # Command results belong on stdout; diagnostic logs go to stderr.
+    json.dump(config.values(), sys.stdout, indent=2)
+    sys.stdout.write('\n')
+    LOGGER.info('Deployment configuration syntax is valid.')
+    return 0
+
+
 def main(argv=None):
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     args = parse_args(argv)
+    if args.action == 'config':
+        return check_deploy_config(args)
     if args.action == 'schedule':
         from backup_schedule import handle
 
@@ -401,17 +432,16 @@ def main(argv=None):
             if isinstance(error, subprocess.CalledProcessError)
             else str(error)
         )
-        print(f'ERROR: {detail}', file=sys.stderr, flush=True)
+        LOGGER.error('%s', detail)
         if args.action not in ('logs', 'status'):
             manager.diagnostics()
-        print(
+        LOGGER.error(
             'Check Docker access, available ports/disk, and the existing .env. '
-            'Database variables do not rotate credentials in an existing volume.',
-            file=sys.stderr,
+            'Database variables do not rotate credentials in an existing volume.'
         )
         return 1
     except KeyboardInterrupt:
-        print('Interrupted. No automatic rollback or data deletion was performed.', file=sys.stderr)
+        LOGGER.warning('Interrupted. No automatic rollback or data deletion was performed.')
         return 130
 
 

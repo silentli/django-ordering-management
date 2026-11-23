@@ -34,14 +34,14 @@ class ManagementTests(unittest.TestCase):
     def test_generated_secrets_are_private_unique_and_not_printed(self, run):
         run.return_value.stdout = ''
         output = StringIO()
-        with redirect_stdout(output):
+        with redirect_stdout(output), self.assertLogs(ops.LOGGER, level='INFO') as logs:
             self.manager.prepare_env('localhost,example.com')
         values = dict(line.split('=', 1) for line in self.env.read_text().splitlines())
         keys = ['DJANGO_SECRET_KEY', 'POSTGRES_PASSWORD', 'STAFF_PASSWORD']
         self.assertEqual(len({values[key] for key in keys}), 3)
         self.assertGreaterEqual(len(values['DJANGO_SECRET_KEY']), 50)
         for key in keys:
-            self.assertNotIn(values[key], output.getvalue())
+            self.assertNotIn(values[key], output.getvalue() + '\n'.join(logs.output))
         self.assertEqual(self.env.stat().st_mode & 0o777, 0o600)
 
     @patch.object(ops.subprocess, 'run')
