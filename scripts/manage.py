@@ -3,6 +3,7 @@
 
 import argparse
 import fcntl
+import http.client
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from deploy_config import ConfigurationError, load_config
+from nginx_runtime import RuntimePreparationError, prepare, probe, site_mode
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = ROOT / 'menu_management/settings/env/.env'
@@ -185,9 +187,17 @@ class Manager:
         except ConfigurationError as error:
             raise OperationError(str(error)) from error
 
-    def verify(self):
+    def verify(self, nginx_mode='http'):
         self.compose('exec', '-T', 'web', 'python', 'manage.py', 'check')
         self.compose('exec', '-T', 'web', 'python', 'manage.py', 'migrate', '--check')
+        if nginx_mode == 'https':
+            self.compose('exec', '-T', 'nginx', 'nginx', '-t')
+            self.compose('ps', '-a')
+            LOGGER.info(
+                'HTTPS configuration retained; container/config checks passed. '
+                'Verify HTTPS requests separately.'
+            )
+            return
         # Exercise Docker DNS, Nginx, Django, the database-backed menu, and a static asset.
         code = """
 import os
@@ -204,6 +214,66 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
 """
         self.compose('exec', '-T', 'web', 'python', '-c', code)
         self.compose('ps', '-a')
+
+    def prepare_runtime(self, initialize=True):
+        try:
+            runtime = prepare(
+                ROOT,
+                self.compose_environment,
+                tls_requested=self.deployment is not None
+                and self.deployment.tls_mode == 'letsencrypt',
+                initialize=initialize,
+            )
+        except (RuntimePreparationError, OSError) as error:
+            raise OperationError(f'Cannot prepare Nginx runtime: {error}') from error
+        LOGGER.info('Active Nginx configuration: %s', runtime.mode)
+        return runtime
+
+    def start_bootstrap(self, runtime):
+        self.compose('up', '-d', '--no-deps', 'nginx')
+        self.compose('exec', '-T', 'nginx', 'nginx', '-t')
+        self.compose('exec', '-T', 'nginx', 'nginx', '-s', 'reload')
+        result = self.compose('port', 'nginx', '80', capture_output=True, text=True)
+        bindings = result.stdout.strip().splitlines()
+        if not bindings:
+            raise OperationError('Nginx has no published HTTP port for bootstrap validation.')
+        try:
+            address, port = bindings[0].rsplit(':', 1)
+            port = int(port)
+        except ValueError as error:
+            raise OperationError('Cannot determine the published Nginx HTTP address.') from error
+        address = '127.0.0.1' if address == '0.0.0.0' else address.strip('[]')
+        try:
+            with probe(runtime.webroot) as (url, expected):
+                deadline = time.monotonic() + 10
+                while True:
+                    connection = http.client.HTTPConnection(address, port, timeout=3)
+                    try:
+                        connection.request('GET', url)
+                        response = connection.getresponse()
+                        if (
+                            response.status != 200
+                            or response.read(len(expected) + 1).decode() != expected
+                        ):
+                            raise OperationError(
+                                'Bootstrap probe did not return the expected file content.'
+                            )
+                        break
+                    except (OperationError, OSError, http.client.HTTPException):
+                        if time.monotonic() >= deadline:
+                            raise
+                        time.sleep(0.2)
+                    finally:
+                        connection.close()
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            raise OperationError(
+                f'Bootstrap validation failed; check webroot mounts and permissions: {error}'
+            ) from error
+        LOGGER.info(
+            'HTTP bootstrap verified locally; '
+            'external port 80 reachability still requires verification.'
+        )
+        LOGGER.info('Ready for certificate issuance. HTTPS is not enabled.')
 
     def diagnostics(self):
         for args in [
@@ -230,8 +300,18 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
         failed = False
         try:
             self.require_env(check_hosts=True)
-            self.verify()
-        except (OperationError, OSError, subprocess.SubprocessError) as error:
+            mode = site_mode(ROOT)
+            if mode == 'bootstrap':
+                self.compose('exec', '-T', 'nginx', 'nginx', '-t')
+                LOGGER.info('Bootstrap configuration is active; application checks are deferred.')
+            else:
+                self.verify(nginx_mode=mode)
+        except (
+            OperationError,
+            RuntimePreparationError,
+            OSError,
+            subprocess.SubprocessError,
+        ) as error:
             detail = (
                 f'Command failed (exit {error.returncode}).'
                 if isinstance(error, subprocess.CalledProcessError)
@@ -352,6 +432,10 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
                         raise OperationError(str(error)) from error
             self.prepare_env(hosts or 'localhost,127.0.0.1')
         self.require_env(check_hosts=True)
+        runtime = self.prepare_runtime(initialize=not update)
+        if runtime.mode == 'bootstrap':
+            self.start_bootstrap(runtime)
+            return
         if update:
             # Build failure leaves the running release untouched.
             self.compose('build')
@@ -365,7 +449,9 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
         self.compose('up', '-d', '--wait', '--wait-timeout', '180', *flags)
         if not args.no_seed:
             self.compose('exec', '-T', 'web', 'python', 'manage.py', 'load_initial_data')
-        self.verify()
+        self.compose('exec', '-T', 'nginx', 'nginx', '-t')
+        self.compose('exec', '-T', 'nginx', 'nginx', '-s', 'reload')
+        self.verify(nginx_mode=runtime.mode)
 
 
 def parse_args(argv=None):

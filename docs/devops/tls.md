@@ -3,8 +3,8 @@
 ## Configuration
 
 Nginx loads only `/etc/nginx/conf.d/site.conf`, mounted from
-`runtime/nginx/conf.d/site.conf`. The image has no fallback site configuration;
-a missing active file prevents startup. Templates are not loaded directly.
+`runtime/nginx/conf.d/site.conf`. `start` initializes this file when absent;
+the image has no fallback site configuration. Templates are not loaded directly.
 
 | Template | Behavior |
 | --- | --- |
@@ -21,12 +21,24 @@ a missing active file prevents startup. Templates are not loaded directly.
 Shell variables `CERTBOT_WEBROOT` and `LETSENCRYPT_DIR` override the last two host
 paths for direct Compose commands. Management commands use `.env.deploy` paths
 when configured, overriding the shell. Certbot must use those same host paths.
-Mount the complete certificate directory
-because `live/` files can link into `archive/`. Changing mount sources requires
+Mount the complete certificate directory because `live/` files can link into
+`archive/`. Changing mount sources requires
 container recreation; updating mounted configuration or certificates requires
 validation and reload.
 
 ## HTTP bootstrap
+
+Set `TLS_MODE=letsencrypt` in `.env.deploy`, then run:
+
+```sh
+python3 scripts/manage.py start
+```
+
+`start` initializes bootstrap if no active configuration exists. A transition from
+the unmodified project HTTP template saves the old file under
+`runtime/nginx/history/` before switching. Existing HTTPS is retained; custom HTTP
+configuration is not overwritten. Repeated bootstrap starts preserve `site.conf`.
+`update` requires an application configuration and does not initialize bootstrap.
 
 Bootstrap provides HTTP validation before certificates are available. It requires
 Docker access, readable application configuration, and a public IP with inbound
@@ -45,6 +57,9 @@ application paths return `503`. A host-local check does not prove public reachab
 Existing HTTPS configuration must be preserved. All operations use the same
 Compose project and host paths. Application checks are deferred until HTTPS
 activation; they cannot pass while bootstrap returns `503`.
+`diagnose` checks bootstrap configuration without requiring the application.
+Host paths need appropriate creation/write permissions; the script does not
+escalate privileges. The local probe is removed after verification, including handled failures.
 
 ### Command reference
 
@@ -66,7 +81,7 @@ Start and validate Nginx:
 
 ```sh
 docker compose -f docker/docker-compose.yml config --quiet
-docker compose -f docker/docker-compose.yml up -d --build --no-deps nginx
+docker compose -f docker/docker-compose.yml up -d --no-deps nginx
 docker compose -f docker/docker-compose.yml exec -T nginx nginx -t
 ```
 
@@ -111,7 +126,8 @@ server. Public issuance, Django HTTPS login and Linux renewal remain unverified.
 ## Limitations and improvements
 
 - **Issuance:** Certbot installation and invocation are not implemented.
-- **Activation:** Template selection is manual; Django secure cookies remain disabled
-  and management checks assume HTTP. Integrate these before public activation.
+- **Activation:** HTTP/bootstrap preparation is automated. HTTPS template rendering
+  and Django secure cookies still require configuration. Existing HTTPS gets
+  container/configuration checks; application HTTPS requests require separate validation.
 - **Renewal:** No certificate timer, reload hook or failure alert is configured.
   `ACME_EMAIL` is optional and unused; it does not configure notifications.

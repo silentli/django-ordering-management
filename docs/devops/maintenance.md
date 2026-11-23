@@ -23,6 +23,10 @@ Application checks require running Web and Nginx services. Failures return nonze
 diagnosis does not modify configuration, restart services, or apply migrations.
 Keep the same `--project-name NAME` for all operations.
 
+In bootstrap mode, `diagnose` validates Nginx configuration without requiring Web
+or database services. With existing HTTPS, it checks Django/migrations and Nginx
+configuration; verify HTTPS requests separately.
+
 For focused inspection:
 
 ```sh

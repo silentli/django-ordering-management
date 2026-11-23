@@ -23,8 +23,6 @@ the Python standard library.
 ```sh
 git clone https://github.com/silentli/menu-management-demo.git
 cd menu-management-demo
-mkdir -p runtime/nginx/conf.d
-cp -n nginx/templates/http.conf runtime/nginx/conf.d/site.conf
 python3 scripts/manage.py start
 ```
 

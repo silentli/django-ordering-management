@@ -69,7 +69,7 @@ on the host; application dependencies run in containers.
 
 | Command | Behavior |
 | --- | --- |
-| `start` | Prepare application environment, build missing images, start, seed an empty menu, and verify |
+| `start` | Prepare application/runtime configuration; start and verify HTTP application or TLS bootstrap |
 | `stop` | Stop services; retain containers and data |
 | `down` | Remove containers and network; retain persistent volumes |
 | `update` | Build current source, back up the database, recreate services, and verify |
@@ -114,14 +114,14 @@ Clone the repository as shown in the [quick start](../../README.md#quick-start),
 select the intended revision, and run:
 
 ```sh
-mkdir -p runtime/nginx/conf.d
-cp -n nginx/templates/http.conf runtime/nginx/conf.d/site.conf
 python3 scripts/manage.py start
 ```
 
-The copy initializes plain HTTP only when `site.conf` is absent. Runtime files
-are excluded from Git and Docker build contexts. Preserve an existing active
-configuration; selecting or switching templates is currently manual.
+`start` creates missing runtime directories and initializes `site.conf` from the
+HTTP template, or the bootstrap template for `TLS_MODE=letsencrypt`. Bootstrap
+starts only Nginx and verifies the HTTP challenge path. See [TLS](tls.md#http-bootstrap)
+for its behavior and command reference. Existing HTTPS configuration is preserved;
+runtime files are excluded from Git and Docker build contexts.
 
 If the application `.env` is absent and no project volumes exist, the script generates
 random Django, database, and staff secrets in a mode-`600` `.env`. It never prints
@@ -225,9 +225,10 @@ when only container removal is intended.
 
 ## Release verification
 
-`start`, `update`, and `diagnose` check Django configuration, pending migrations,
-and HTTP responses through Nginx for health, menu, the staff login page, and an admin CSS
-asset. These requests originate inside the stack. Verify the published host port:
+In application mode, `start`, `update`, and `diagnose` check Django configuration and
+pending migrations. With the HTTP configuration they also request health, menu,
+the staff login page, and an admin CSS asset through Nginx. These requests originate
+inside the stack. Verify the published HTTP port:
 
 ```sh
 curl --fail --show-error http://localhost/health/

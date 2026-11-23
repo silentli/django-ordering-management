@@ -9,6 +9,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -74,6 +75,7 @@ class ManagementTests(unittest.TestCase):
             self.fail('Concurrent operation entered lock')
 
     def test_update_does_not_replace_services_if_backup_fails(self):
+        self.manager.prepare_runtime = Mock(return_value=SimpleNamespace(mode='http'))
         self.manager.prepare_env = Mock()
         self.manager.require_env = Mock()
         self.manager.compose = Mock()
@@ -89,6 +91,7 @@ class ManagementTests(unittest.TestCase):
         self.manager.verify.assert_not_called()
 
     def test_regular_start_does_not_force_image_rebuild(self):
+        self.manager.prepare_runtime = Mock(return_value=SimpleNamespace(mode='http'))
         self.manager.prepare_env = Mock()
         self.manager.require_env = Mock()
         self.manager.compose = Mock()
