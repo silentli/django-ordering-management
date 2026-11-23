@@ -1,6 +1,7 @@
 """Install project-scoped systemd backup timers; preview is available on any host."""
 
 import json
+import logging
 import os
 import pwd
 import re
@@ -12,6 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 UNIT_DIRECTORY = Path('/etc/systemd/system')
+LOGGER = logging.getLogger(__name__)
 
 
 def unit_quote(value):
@@ -103,10 +105,7 @@ def atomic_write(path, content):
 def install(root, project, args):
     units = render_units(root, project, args.user, args.at, args.timezone)
     if args.dry_run:
-        for filename, content in units.items():
-            print(f'--- {UNIT_DIRECTORY / filename} ---\n{content}')
-        print('Preview only: no files written, no backup run, no timer enabled.')
-        return
+        return units
     require_systemd(root=True)
     pwd.getpwnam(args.user)
     for filename in units:
@@ -148,8 +147,12 @@ def install(root, project, args):
     timer = f'menu-backup-{project}.timer'
     subprocess.run(['systemctl', 'enable', timer], check=True)
     subprocess.run(['systemctl', 'restart', timer], check=True)
-    print(
-        f'Enabled {timer}: daily {args.at} {args.timezone}; log: {root / "data/backups/backup.log"}'
+    LOGGER.info(
+        'Enabled %s: daily %s %s; log: %s',
+        timer,
+        args.at,
+        args.timezone,
+        root / 'data/backups/backup.log',
     )
 
 
@@ -157,13 +160,17 @@ def handle(root, project, args):
     try:
         name = f'menu-backup-{project}'
         if args.schedule_action == 'install':
-            install(root, project, args)
+            units = install(root, project, args)
+            if args.dry_run:
+                for filename, content in units.items():
+                    sys.stdout.write(f'--- {UNIT_DIRECTORY / filename} ---\n{content}\n')
+                LOGGER.info('Preview only: no files written, no backup run, no timer enabled.')
         elif args.schedule_action == 'disable':
             require_systemd(root=True)
             for suffix in ('service', 'timer'):
                 assert_owned(UNIT_DIRECTORY / f'{name}.{suffix}', root)
             subprocess.run(['systemctl', 'disable', '--now', f'{name}.timer'], check=True)
-            print(
+            LOGGER.info(
                 'Timer disabled; active backups and service retries are unchanged. '
                 'Manual backup remains available.'
             )
@@ -181,9 +188,13 @@ def handle(root, project, args):
             )
         return 0
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
-        print(f'Schedule error: {error}', file=sys.stderr)
-        print(
-            'Inspect schedule status and journalctl before retrying; backups are retained.',
-            file=sys.stderr,
+        LOGGER.error('Schedule error: %s', error)
+        LOGGER.error(
+            'Inspect schedule status and journalctl before retrying; backups are retained.'
         )
         return 1
+    except KeyboardInterrupt:
+        LOGGER.warning(
+            'Schedule operation interrupted; inspect units and timer status before retrying.'
+        )
+        return 130

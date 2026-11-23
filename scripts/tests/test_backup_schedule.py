@@ -41,12 +41,11 @@ class ScheduleTests(unittest.TestCase):
     @patch.object(schedule.subprocess, 'run')
     @patch.object(schedule, 'atomic_write')
     def test_preview_never_writes_or_runs_commands(self, write, run):
-        with redirect_stdout(StringIO()) as output:
-            schedule.install(self.root, 'staging', self.options(dry_run=True))
+        units = schedule.install(self.root, 'staging', self.options(dry_run=True))
         run.assert_not_called()
         write.assert_not_called()
-        self.assertIn('menu-backup-staging.timer', output.getvalue())
-        self.assertIn('--project-name "staging"', output.getvalue())
+        self.assertIn('menu-backup-staging.timer', units)
+        self.assertIn('--project-name "staging"', units['menu-backup-staging.service'])
 
     def test_bad_parameters_cannot_become_unit_directives(self):
         for overrides in (
