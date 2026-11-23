@@ -6,9 +6,25 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - static_volume:/app/staticfiles:ro
       - media_volume:/app/media
+      # Prepare site.conf from a template before starting Nginx.
+      - type: bind
+        source: ../runtime/nginx/conf.d
+        target: /etc/nginx/conf.d
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${CERTBOT_WEBROOT:-../runtime/certbot/www}
+        target: /var/www/certbot
+        read_only: true
+      - type: bind
+        source: ${LETSENCRYPT_DIR:-../runtime/certbot/letsencrypt}
+        target: /etc/letsencrypt
+        read_only: true
     depends_on:
       web:
         condition: service_healthy

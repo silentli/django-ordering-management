@@ -30,6 +30,7 @@ ENV/
 **/.env.*
 menu_management/settings/env/
 data/
+runtime/
 media/
 staticfiles/
 **/*.log
