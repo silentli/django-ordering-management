@@ -43,10 +43,20 @@ cp -n docker/deploy.env.example .env.deploy
 ```
 
 Edit `PUBLIC_HOST` before real deployment. The example IP is documentation-only.
-The `diagnose` command checks deployment parameters alongside Docker and the
-running application. Use `diagnose --config /absolute/path/to/deploy.env` for
-another deployment file; otherwise it checks `.env.deploy` when present.
-File values override built-in defaults; Shell variables do not override them.
+Management commands that invoke Compose read `.env.deploy` when present.
+Its mount paths override same-named shell variables and are used consistently by
+startup, updates, backups and diagnostics. These are host-side Compose inputs,
+not additional environment variables injected into application containers.
+Without the file, the existing Compose defaults and shell inputs remain in use.
+
+On first start, `PUBLIC_HOST` is included in the generated `ALLOWED_HOSTS`, along
+with `localhost,127.0.0.1`. An explicit `start --hosts` must include it too.
+For an existing application `.env`, `ALLOWED_HOSTS` must explicitly include
+`PUBLIC_HOST`; a mismatch stops deployment without rewriting the file.
+
+`diagnose` checks the same configuration and host consistency. Use
+`diagnose --config /absolute/path/to/deploy.env` to inspect another deployment file.
+File values override built-in defaults; shell variables do not override them.
 The format supports `KEY=value`, quotes and comments, but no `export`, variable
 expansion or shell commands. Unknown and duplicate keys are rejected.
 
@@ -119,9 +129,10 @@ those secrets or overwrites existing values. Read `STAFF_PASSWORD` from the file
 to sign in. If volumes exist but `.env` is missing, restore the original file;
 startup refuses to generate replacement credentials.
 
-For a new `.env`, `start --hosts menu.example.com,localhost,127.0.0.1` sets
-`ALLOWED_HOSTS`. For an existing file, edit it explicitly; `--hosts` does not
-replace it. Host validation does not configure DNS or HTTPS.
+For a new application `.env`, `--hosts` overrides the initial host list. Otherwise
+the list includes `PUBLIC_HOST` when configured, plus `localhost,127.0.0.1`.
+For an existing file, edit it explicitly; `--hosts` does not replace it.
+Host validation does not configure DNS or HTTPS.
 
 The Web entrypoint validates required variables, waits for the database, applies
 migrations, and starts Gunicorn. Static collection finishes before Web starts.

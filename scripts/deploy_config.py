@@ -19,14 +19,20 @@ class DeploymentConfig:
     certbot_webroot: Path
     letsencrypt_dir: Path
 
-    def values(self):
+    def compose_environment(self):
+        """Host-side interpolation inputs, not service environment variables."""
         return {
-            'PUBLIC_HOST': self.public_host,
-            'TLS_MODE': self.tls_mode,
-            'ACME_ENV': self.acme_env,
             'CERTBOT_WEBROOT': str(self.certbot_webroot),
             'LETSENCRYPT_DIR': str(self.letsencrypt_dir),
         }
+
+    def check_allowed_hosts(self, allowed_hosts):
+        entries = {host.strip().lower().rstrip('.') for host in allowed_hosts.split(',')}
+        if self.public_host not in entries:
+            raise ConfigurationError(
+                'ALLOWED_HOSTS must explicitly include PUBLIC_HOST in the application .env. '
+                'Existing application settings and credentials have not been changed.'
+            )
 
 
 DEFAULTS = {

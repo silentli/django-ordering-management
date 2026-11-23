@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -10,7 +11,9 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-spec = importlib.util.spec_from_file_location('menu_ops', Path(__file__).parents[1] / 'manage.py')
+SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SCRIPTS))
+spec = importlib.util.spec_from_file_location('menu_ops', SCRIPTS / 'manage.py')
 ops = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ops)
 

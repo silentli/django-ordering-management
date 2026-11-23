@@ -16,6 +16,8 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
+from deploy_config import ConfigurationError, load_config
+
 ROOT = Path(__file__).resolve().parents[1]
 ENV = ROOT / 'menu_management/settings/env/.env'
 LOGGER = logging.getLogger(__name__)
@@ -64,6 +66,8 @@ def operation_lock():
 class Manager:
     def __init__(self, project):
         self.project = project
+        self.deployment = None
+        self.compose_environment = None
         self.base = [
             'docker',
             'compose',
@@ -73,10 +77,33 @@ class Manager:
             str(ROOT / 'docker/docker-compose.yml'),
         ]
 
+    def configure_deployment(self, path=None):
+        target = path if path is not None else ROOT / '.env.deploy'
+        try:
+            config = (
+                load_config(target)
+                if path is not None or target.exists() or target.is_symlink()
+                else None
+            )
+        except ConfigurationError as error:
+            raise OperationError(str(error)) from error
+        environment = os.environ.copy()
+        if config is not None:
+            environment.update(config.compose_environment())
+            LOGGER.info('Using deployment configuration: %s', target)
+        self.deployment = config
+        self.compose_environment = environment
+
     def compose(self, *args, **kwargs):
-        return subprocess.run(self.base + list(args), cwd=ROOT, check=True, **kwargs)
+        if self.compose_environment is None:
+            self.configure_deployment()
+        return subprocess.run(
+            self.base + list(args), cwd=ROOT, env=self.compose_environment, check=True, **kwargs
+        )
 
     def preflight(self):
+        if self.compose_environment is None:
+            self.configure_deployment()
         version = subprocess.run(
             ['docker', 'compose', 'version', '--short'],
             check=True,
@@ -132,10 +159,31 @@ class Manager:
             ENV,
         )
 
-    def require_env(self):
+    def require_env(self, check_hosts=False):
+        if self.compose_environment is None:
+            self.configure_deployment()
         if not ENV.is_file():
             raise OperationError('Runtime .env is missing. Run start for a new installation.')
-        self.compose('config', '--quiet')
+        if self.deployment is None or not check_hosts:
+            self.compose('config', '--quiet')
+            return
+        # Compose parses the application's env_file. Do not log its resolved output:
+        # it includes credentials as well as ALLOWED_HOSTS.
+        result = self.compose('config', '--format', 'json', capture_output=True, text=True)
+        try:
+            allowed_hosts = json.loads(result.stdout)['services']['web']['environment'][
+                'ALLOWED_HOSTS'
+            ]
+        except (ValueError, KeyError, TypeError) as error:
+            raise OperationError(
+                'Cannot inspect ALLOWED_HOSTS in the resolved Compose configuration.'
+            ) from error
+        try:
+            if not isinstance(allowed_hosts, str):
+                raise ConfigurationError('ALLOWED_HOSTS must be a comma-separated string.')
+            self.deployment.check_allowed_hosts(allowed_hosts)
+        except ConfigurationError as error:
+            raise OperationError(str(error)) from error
 
     def verify(self):
         self.compose('exec', '-T', 'web', 'python', 'manage.py', 'check')
@@ -164,31 +212,24 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
         ]:
             try:
                 self.compose(*args)
-            except (OSError, subprocess.CalledProcessError):
+            except (OperationError, OSError, subprocess.SubprocessError):
                 LOGGER.warning('Docker diagnostic command unavailable: %s', args[0])
 
     def diagnose(self, config_path=None):
-        from deploy_config import ConfigurationError, load_config
-
-        failed = False
-        path = config_path if config_path is not None else ROOT / '.env.deploy'
-        if config_path is not None or path.exists():
-            try:
-                load_config(path)
-                LOGGER.info('Deployment configuration syntax is valid: %s', path)
-            except ConfigurationError as error:
-                LOGGER.error('%s', error)
-                failed = True
-        else:
-            LOGGER.info('No deployment file at %s; checking the existing application.', path)
+        try:
+            self.configure_deployment(config_path)
+        except OperationError as error:
+            LOGGER.error('%s', error)
+            return 1
         try:
             self.preflight()
         except (OperationError, OSError, subprocess.SubprocessError) as error:
             LOGGER.error('Docker preflight failed: %s', error)
             return 1
         self.diagnostics()
+        failed = False
         try:
-            self.require_env()
+            self.require_env(check_hosts=True)
             self.verify()
         except (OperationError, OSError, subprocess.SubprocessError) as error:
             detail = (
@@ -296,9 +337,21 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
         return path
 
     def start(self, args, update=False):
+        if self.compose_environment is None:
+            self.configure_deployment()
         if not update:
-            self.prepare_env(args.hosts)
-        self.require_env()
+            hosts = args.hosts
+            if self.deployment is not None:
+                hosts = hosts or ','.join(
+                    dict.fromkeys([self.deployment.public_host, 'localhost', '127.0.0.1'])
+                )
+                if not ENV.exists():
+                    try:
+                        self.deployment.check_allowed_hosts(hosts)
+                    except ConfigurationError as error:
+                        raise OperationError(str(error)) from error
+            self.prepare_env(hosts or 'localhost,127.0.0.1')
+        self.require_env(check_hosts=True)
         if update:
             # Build failure leaves the running release untouched.
             self.compose('build')
@@ -342,8 +395,7 @@ def parse_args(argv=None):
         if action == 'start':
             command.add_argument(
                 '--hosts',
-                default='localhost,127.0.0.1',
-                help='ALLOWED_HOSTS for a NEW .env only; existing files are preserved',
+                help='Initial ALLOWED_HOSTS; default: PUBLIC_HOST plus localhost/127.0.0.1',
             )
         command.add_argument(
             '--no-seed',
@@ -412,7 +464,11 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', args.project_name):
         parser.error('project-name must contain lowercase letters, digits, underscores or hyphens')
-    if args.action == 'start' and not re.fullmatch(r'[A-Za-z0-9.,*:\[\]-]+', args.hosts):
+    if (
+        args.action == 'start'
+        and args.hosts is not None
+        and not re.fullmatch(r'[A-Za-z0-9.,*:\[\]-]+', args.hosts)
+    ):
         parser.error(
             'hosts must be comma-separated hostnames/IP addresses, without spaces or schemes'
         )
