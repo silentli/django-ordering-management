@@ -17,8 +17,8 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
-from deploy_config import ConfigurationError, load_config
-from nginx_runtime import RuntimePreparationError, prepare, probe, site_mode
+from ops.deploy_config import ConfigurationError, load_config
+from ops.nginx_runtime import RuntimePreparationError, prepare, probe, site_mode
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = ROOT / 'menu_management/settings/env/.env'
@@ -567,7 +567,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     args = parse_args(argv)
     if args.action == 'schedule':
-        from backup_schedule import handle
+        from ops.backup_schedule import handle
 
         return handle(ROOT, args.project_name, args)
     manager = Manager(args.project_name)

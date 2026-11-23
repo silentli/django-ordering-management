@@ -72,7 +72,7 @@ archives and log records have no automatic retention or rotation.
 | Component | Responsibility |
 | --- | --- |
 | `scripts/manage.py` | Administrator CLI and actual backup entry point |
-| `scripts/backup_schedule.py` | Generate, validate, install, inspect, and disable systemd configuration |
+| `scripts/ops/backup_schedule.py` | Generate, validate, install, inspect, and disable systemd configuration |
 | `.timer` / `.service` | Linux triggers `manage.py backup --source scheduled` at the scheduled time |
 
 Use one scheduler per installation. `start` does not enable a schedule.

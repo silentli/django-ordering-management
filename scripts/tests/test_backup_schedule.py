@@ -1,7 +1,8 @@
 """Timer installation safeguards; no host service is installed by these tests."""
 
-import importlib.util
+import importlib
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -10,12 +11,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location(
-    'backup_schedule', Path(__file__).parents[1] / 'backup_schedule.py'
-)
-schedule = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(schedule)
 SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SCRIPTS))
+schedule = importlib.import_module('ops.backup_schedule')
 
 
 class ScheduleTests(unittest.TestCase):

@@ -60,7 +60,7 @@ Selected source, configuration, and documentation paths:
 ├── nginx/                     # Reverse proxy and asset-serving configuration
 ├── static/                    # Source static assets
 ├── requirements/              # Runtime, development, test, and quality dependencies
-├── scripts/                   # Host management CLI and safety tests
+├── scripts/                   # Management CLI, ops modules, and safety tests
 ├── .github/workflows/         # CI and failure investigation workflows
 ├── ci_acceptance/             # Isolated CI tooling contracts
 ├── docs/                      # Technical documentation
