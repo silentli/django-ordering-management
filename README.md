@@ -54,5 +54,6 @@ Public deployment requires the environment checks in the
 | [DevOps](docs/devops/README.md) | Deployment topology, persistent storage, environment status |
 | [CI](docs/devops/ci.md) | Workflows, triggers, runners, permissions, failure diagnostics |
 | [Deployment](docs/devops/deployment.md) | Configuration, provisioning, release verification, rollback |
+| [TLS and certificates](docs/devops/tls.md) | HTTP bootstrap, certificate mounts, HTTPS configuration and limitations |
 | [Backup and restore](docs/devops/backup-and-restore.md) | Manual/scheduled backups, shared log, restore validation |
 | [Maintenance](docs/devops/maintenance.md) | Service diagnostics, incident triage, recurring checks |

@@ -78,6 +78,7 @@ Selected source, configuration, and documentation paths:
 | Infrastructure | [DevOps overview](devops/README.md) | Service topology, storage boundaries, environment configuration |
 | Continuous integration | [CI](devops/ci.md) | Workflows, triggers, execution environments, permissions, diagnostics |
 | Releases | [Deployment](devops/deployment.md) | Initial setup, configuration, rollout, verification, rollback constraints |
+| Transport security | [TLS and certificates](devops/tls.md) | Nginx templates, HTTP bootstrap, mounts, HTTPS prerequisites and limitations |
 | Data protection | [Backup and restore](devops/backup-and-restore.md) | Manual/scheduled backups, shared log, isolated restore, recovery limitations |
 | Operations | [Maintenance](devops/maintenance.md) | Diagnostics, incident triage, recurring maintenance |
 | CI tooling | [Acceptance packages](../ci_acceptance/README.md) | Isolated packaging contracts and execution boundaries |

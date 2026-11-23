@@ -10,6 +10,7 @@ and host schedule activation require target-server verification.
 | --- | --- |
 | CI workflows, execution environments, permissions, and diagnostics | [Continuous integration](ci.md) |
 | Configure an environment, deploy, release, or assess rollback | [Deployment](deployment.md) |
+| Prepare HTTP validation and inspect certificate/HTTPS configuration | [TLS and certificates](tls.md) |
 | Run/schedule backups, inspect the shared log, or rehearse restoration | [Backup and restore](backup-and-restore.md) |
 | Check services, inspect logs, or investigate failures | [Maintenance](maintenance.md) |
 
@@ -27,9 +28,10 @@ flowchart LR
     db --- data[(Database volume)]
 ```
 
-The [Compose file](../../docker/docker-compose.yml) also publishes database port
-`5432` on the host. The diagram shows application traffic; host exposure must be
-considered separately from the internal service network.
+The [Compose file](../../docker/docker-compose.yml) also publishes ports `443`
+and `5432` on the host. HTTPS requires the [TLS configuration](tls.md); publishing
+port `443` alone does not enable it. The diagram shows HTTP application traffic;
+host exposure must be considered separately from the internal service network.
 
 | Component | Responsibility | Persistent storage |
 | --- | --- | --- |
@@ -54,8 +56,8 @@ the database; it does not prove business operations or recovery.
 | Area | Repository evidence | Environment confirmation required |
 | --- | --- | --- |
 | Runtime | Python 3.12 image, Gunicorn, production settings | Deployed revision and image identities |
-| Networking | Nginx on host port 80; DB on host port 5432 | Firewall, external reachability, domain |
-| TLS and cookies | No TLS listener; secure cookie flags and SSL redirect disabled | Public HTTPS configuration and checks |
+| Networking | Host ports 80/443 for Nginx and 5432 for DB | Firewall, external reachability, public IP/domain |
+| TLS and cookies | HTTP/bootstrap/HTTPS templates; manual selection; secure cookies disabled | Issuance, Django HTTPS integration and renewal |
 | Secrets | Runtime `.env`; optional root `.env.admin` | Secret ownership, access, and recovery location |
 | Data | Database, static, and media volumes | Actual volume names, size, and storage location |
 | Backups | Shared log; manual/pre-release dumps; optional systemd timer or cron | Host schedule activation, offsite destination, retention, restore evidence |

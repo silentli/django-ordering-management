@@ -1,7 +1,7 @@
 # Deployment
 
 Run commands from the repository root on the Docker host. The default stack uses
-HTTP; public deployment also requires TLS termination, secure
+HTTP; public deployment also requires [TLS and certificates](tls.md), secure
 cookies, and restricted database exposure.
 
 ## Preconditions and configuration
