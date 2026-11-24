@@ -65,12 +65,13 @@ expansion or shell commands. Unknown and duplicate keys are rejected.
 
 ## Automated host management
 
-Use `python3 scripts/manage.py COMMAND`. Only Python's standard library is needed
-on the host; application dependencies run in containers.
+Use `python3 scripts/manage.py COMMAND` for host operations; the root `manage.py`
+runs Django commands. Only Python's standard library is needed for the host CLI;
+application dependencies run in containers.
 
 | Command | Behavior |
 | --- | --- |
-| `start` | Prepare application/runtime configuration; start and verify HTTP or HTTPS application |
+| `start` | Initialize/start HTTP or HTTPS; reuse existing images and build missing ones |
 | `stop` | Stop services; retain containers and data |
 | `down` | Remove containers and network; retain persistent volumes |
 | `update` | Build current source, back up the database, recreate services, and verify |
@@ -80,11 +81,13 @@ on the host; application dependencies run in containers.
 | `backup` | Create and inspect a database archive |
 | `renew-certificate` | Check/renew the configured certificate and reload Nginx when needed |
 | `schedule install --user USER [--task TASK]` | Run the task once, install and enable its Linux timer; requires sudo |
-| `schedule status` | Show the timer and last service result |
-| `schedule disable` | Disable future timer activations; requires sudo |
+| `schedule status [--task TASK]` | Show the selected timer and last service result |
+| `schedule disable [--task TASK]` | Disable the selected timer; requires sudo |
 | `destroy --confirm docker` | Back up the database, then remove containers and volumes |
 
-Use `COMMAND --help` for command-specific options. `start --hosts HOSTS` only
+Use `COMMAND --help` for behavior and options. `start` completes initialization;
+use `update` to rebuild changed code and back up before replacing services.
+`start --hosts HOSTS` only
 initializes a new application `.env`; `update` requires the existing file and does
 not accept `--hosts`. Both accept `--no-seed`. `logs -f` and `logs --follow` are
 equivalent; ordinary `logs` returns the latest 100 lines.
@@ -110,7 +113,9 @@ Manual and scheduled backups share `data/backups/backup.log`, including backups
 before updates/deletion. See [backup logging and scheduling](backup-and-restore.md#shared-backup-log)
 for backup scheduling and [TLS](tls.md#certificate-renewal) for certificate renewal.
 `schedule` defaults to backup; select `--task certificate` for renewal. Schedules
-are not installed by `start`.
+are not installed by `start`. Backup and `renew-certificate` run immediately;
+`schedule` manages future execution. Certificate checks use a fixed twice-daily UTC
+schedule; `--at` and `--timezone` customize backups only.
 
 ## First deployment
 

@@ -725,53 +725,90 @@ connection.close()
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description=__doc__,
+        prog='python3 scripts/manage.py',
+        description=(
+            'Manage Docker host deployment from the repository root.\n'
+            'Django application commands use the separate root manage.py.'
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             'Lifecycle: start, update, stop, down, destroy\n'
             'Inspection: status, logs, diagnose\n'
             'Maintenance: backup, renew-certificate, schedule\n'
-            'Use COMMAND --help for options. --project-name may appear before or after a command.'
+            'Use COMMAND --help for details. --project-name works before or after a command.\n\n'
+            'Examples:\n'
+            '  python3 scripts/manage.py start\n'
+            '  python3 scripts/manage.py update\n'
+            '  python3 scripts/manage.py diagnose\n'
+            '  python3 scripts/manage.py schedule status --task certificate'
         ),
     )
-    parser.add_argument(
-        '--project-name',
-        default='docker',
-        help='Compose identity; default docker preserves the existing stack/volumes',
-    )
+    project_help = 'Compose project name (default: docker); keep consistent across operations'
+    parser.add_argument('--project-name', default='docker', metavar='NAME', help=project_help)
     sub = parser.add_subparsers(dest='action', required=True)
     for action in ('start', 'update'):
         command = sub.add_parser(
             action,
-            help='Generate missing configuration and deploy'
+            help='Initialize configuration and start HTTP or HTTPS'
             if action == 'start'
-            else 'Build, back up DB, and deploy this checkout',
+            else 'Build current code, back up DB, and recreate services',
+            description=(
+                'Prepare missing configuration and start the application. TLS mode runs '
+                'bootstrap, obtains or reuses a certificate, and enables HTTPS. Existing '
+                'images are reused; missing images are built. Use update to rebuild changed code.'
+                if action == 'start'
+                else 'Build this checkout, back up the database, recreate services and verify '
+                'the application. Requires existing configuration; complete TLS setup with start.'
+            ),
         )
         if action == 'start':
             command.add_argument(
                 '--hosts',
-                help='Initial ALLOWED_HOSTS; default: PUBLIC_HOST plus localhost/127.0.0.1',
+                metavar='HOSTS',
+                help='Initial ALLOWED_HOSTS; localhost,127.0.0.1 plus PUBLIC_HOST when configured. '
+                'Existing application .env is preserved',
             )
         command.add_argument(
             '--no-seed',
             action='store_true',
-            help='Do not import the bundled menu into an empty database',
+            help='Skip importing bundled menu data when the menu table is empty',
         )
     sub.add_parser(
-        'stop', help='Stop services; keep containers and data (pause service availability)'
+        'stop',
+        help='Stop services; retain containers and data',
+        description='Pause services while retaining containers and data. Use start to resume.',
     )
-    sub.add_parser('down', help='Remove containers and network; retain all persistent volumes')
-    sub.add_parser('status', help='Show container health and ports without application checks')
+    sub.add_parser(
+        'down',
+        help='Remove containers and network; retain data volumes',
+        description='Remove project containers and network while retaining data volumes. '
+        'Use start to recreate services with the existing configuration and data.',
+    )
+    sub.add_parser(
+        'status',
+        help='Show container state, health and ports',
+        description='Quick container-state inspection. Use diagnose to check configuration '
+        'and application requests.',
+    )
     diagnose = sub.add_parser(
-        'diagnose', help='Check configuration, Docker and the running application'
+        'diagnose',
+        help='Check configuration and the running application',
+        description='Check deployment parameters, Docker, Nginx and application requests; '
+        'show logs, certificate expiry and timer state when applicable. '
+        'Configuration and running services are preserved.',
     )
     diagnose.add_argument(
         '--config',
         type=Path,
         metavar='PATH',
-        help='Deployment file; default: repository .env.deploy if present',
+        help='Deployment file for diagnostics only (default: repository .env.deploy if present)',
     )
-    backup = sub.add_parser('backup', help='Create and inspect a private PostgreSQL dump')
+    backup = sub.add_parser(
+        'backup',
+        help='Run a PostgreSQL backup now',
+        description='Create and inspect a private PostgreSQL archive and record the result '
+        'in data/backups/backup.log. Automatic backups are configured with schedule install.',
+    )
     backup.add_argument(
         '--source',
         choices=('manual', 'scheduled'),
@@ -779,29 +816,61 @@ def parse_args(argv=None):
         help=argparse.SUPPRESS,  # Internal timer/cron audit metadata.
     )
     renew = sub.add_parser(
-        'renew-certificate', help='Renew the managed certificate and reload Nginx when needed'
+        'renew-certificate',
+        help='Check certificate renewal and reload Nginx when needed',
+        description='Run one renewal check using .env.deploy and active HTTPS. Certbot decides '
+        'whether renewal is due. Validate and load any pending certificate with nginx -t, '
+        'reload and a live fingerprint check. Automatic checks use schedule --task certificate.',
     )
     renew.add_argument(
         '--source', choices=('manual', 'scheduled'), default='manual', help=argparse.SUPPRESS
     )
-    logs = sub.add_parser('logs', help='Show recent logs')
+    logs = sub.add_parser(
+        'logs',
+        help='Show container logs',
+        description='Show the latest 100 log lines from project containers. '
+        'Use --follow to stream new output until Ctrl+C.',
+    )
     logs.add_argument('-f', '--follow', action='store_true', help='Stream logs until interrupted')
-    schedule = sub.add_parser('schedule', help='Manage Linux systemd backup or certificate timers')
+    schedule = sub.add_parser(
+        'schedule',
+        help='Install, inspect or disable maintenance timers',
+        description='Manage Linux systemd timers for backup (default) or certificate renewal. '
+        'The backup and renew-certificate commands execute those tasks manually.',
+    )
     schedule_commands = schedule.add_subparsers(dest='schedule_action', required=True)
     install = schedule_commands.add_parser(
-        'install', help='Run the task once, install, and enable its timer'
+        'install',
+        help='Check the task, install units and enable its timer',
+        description='Validate systemd units and run the selected task once as --user, '
+        'then install units and enable the timer. Requires Linux/systemd and sudo. '
+        'Backup: daily 03:00 Europe/Berlin by default. Certificate: twice daily UTC with jitter. '
+        'Use --dry-run to preview on any host without executing the task or writing units.',
     )
     install.add_argument(
-        '--user', required=True, help='Existing deployment account with Docker access'
+        '--user',
+        required=True,
+        metavar='USER',
+        help='Existing task execution account with Docker and required file permissions',
     )
-    install.add_argument('--at', help='Backup only: daily HH:MM (default 03:00)')
-    install.add_argument('--timezone', help='Backup only: IANA timezone (default Europe/Berlin)')
+    install.add_argument('--at', metavar='HH:MM', help='Backup only: daily time (default: 03:00)')
+    install.add_argument(
+        '--timezone', metavar='ZONE', help='Backup only: IANA timezone (default: Europe/Berlin)'
+    )
     install.add_argument(
         '--dry-run', action='store_true', help='Preview units without changing the host'
     )
-    schedule_commands.add_parser('status', help='Show the timer and last service result')
     schedule_commands.add_parser(
-        'disable', help='Disable future runs; retain units, backups, and logs'
+        'status',
+        help='Show the selected timer and last service result',
+        description='Show timer activations and the last service result for --task. '
+        'Requires Linux/systemd; sudo is normally unnecessary.',
+    )
+    schedule_commands.add_parser(
+        'disable',
+        help='Disable the selected timer; retain units and task data',
+        description='Disable future timer activations for --task. Active attempts and service '
+        'retries continue; manual execution remains available. Requires sudo.',
     )
     for command in (schedule, *schedule_commands.choices.values()):
         command.add_argument(
@@ -811,7 +880,11 @@ def parse_args(argv=None):
             help='Scheduled task (default: backup)',
         )
     destroy = sub.add_parser(
-        'destroy', help='Back up DB, then delete containers AND project volumes'
+        'destroy',
+        help='Back up DB, then delete containers AND project data volumes',
+        description='Create and inspect a database archive, then remove project containers and '
+        'data volumes, including database and media. Requires --confirm to match '
+        '--project-name. Use down to retain volumes.',
     )
     destroy.add_argument(
         '--confirm',
@@ -825,7 +898,7 @@ def parse_args(argv=None):
             '--project-name',
             default=argparse.SUPPRESS,
             metavar='NAME',
-            help='Compose project name (default: docker)',
+            help=project_help,
         )
     args = parser.parse_args(argv)
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', args.project_name):
@@ -838,6 +911,13 @@ def parse_args(argv=None):
         parser.error(
             'hosts must be comma-separated hostnames/IP addresses, without spaces or schemes'
         )
+    if (
+        args.action == 'schedule'
+        and args.schedule_action == 'install'
+        and args.task == 'certificate'
+        and (args.at is not None or args.timezone is not None)
+    ):
+        install.error('--at and --timezone are backup-only; certificate checks run twice daily UTC')
     if args.action == 'destroy' and args.confirm != args.project_name:
         parser.error('destroy --confirm must exactly match the Compose project name')
     return args
