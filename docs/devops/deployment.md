@@ -119,8 +119,9 @@ python3 scripts/manage.py start
 
 `start` creates missing runtime directories and initializes `site.conf` from the
 HTTP template, or the bootstrap template for `TLS_MODE=letsencrypt`. Bootstrap
-starts only Nginx and verifies the HTTP challenge path. See [TLS](tls.md#http-bootstrap)
-for its behavior and command reference. Existing HTTPS configuration is preserved;
+starts only Nginx, verifies the HTTP challenge path, then obtains or reuses a
+certificate. It remains active until HTTPS activation. See [TLS](tls.md#http-bootstrap)
+for requirements and the command reference. Existing HTTPS configuration is preserved;
 runtime files are excluded from Git and Docker build contexts.
 
 If the application `.env` is absent and no project volumes exist, the script generates

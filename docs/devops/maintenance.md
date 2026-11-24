@@ -23,8 +23,9 @@ Application checks require running Web and Nginx services. Failures return nonze
 diagnosis does not modify configuration, restart services, or apply migrations.
 Keep the same `--project-name NAME` for all operations.
 
-In bootstrap mode, `diagnose` validates Nginx configuration without requiring Web
-or database services. With existing HTTPS, it checks Django/migrations and Nginx
+In bootstrap mode, `diagnose` validates Nginx configuration and the managed
+certificate without requiring Web or database services. It never requests certificates.
+With existing HTTPS, it checks Django/migrations and Nginx
 configuration; verify HTTPS requests separately.
 
 For focused inspection:
@@ -36,7 +37,7 @@ df -h
 docker system df
 ```
 
-Expected state: `db` and `web` are healthy, `nginx` is running, and `collect-static`
+In application mode, `db` and `web` are healthy, `nginx` is running, and `collect-static`
 has exited with code `0`. `init-admin` may be absent because it is an optional task.
 Migration inspection requires a running Web container; if startup failed, begin
 with Web and database logs. Nginx configuration inspection requires running Nginx.

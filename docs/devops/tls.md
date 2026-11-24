@@ -2,6 +2,19 @@
 
 ## Configuration
 
+Deployment options in `.env.deploy`:
+
+| Option | Behavior |
+| --- | --- |
+| `TLS_MODE=http` | Initialize HTTP application access; do not call Certbot |
+| `TLS_MODE=letsencrypt` | Initialize bootstrap, then obtain or reuse a certificate through Certbot |
+| `ACME_ENV=staging` | Use the Let’s Encrypt test API; certificates are not browser-trusted |
+| `ACME_ENV=production` | Use the Let’s Encrypt production API for publicly trusted certificates |
+
+The example selects `letsencrypt` and `staging`. Certbot and Let’s Encrypt are
+fixed in the implementation. Certificate acquisition does not yet activate HTTPS;
+existing HTTPS configuration is preserved when changing `TLS_MODE`.
+
 Nginx loads only `/etc/nginx/conf.d/site.conf`, mounted from
 `runtime/nginx/conf.d/site.conf`. `start` initializes this file when absent;
 the image has no fallback site configuration. Templates are not loaded directly.
@@ -28,7 +41,8 @@ validation and reload.
 
 ## HTTP bootstrap
 
-Set `TLS_MODE=letsencrypt` in `.env.deploy`, then run:
+Set `TLS_MODE=letsencrypt` in `.env.deploy` and prepare the
+[certificate requirements](#certificate-acquisition), then run:
 
 ```sh
 python3 scripts/manage.py start
@@ -57,7 +71,8 @@ application paths return `503`. A host-local check does not prove public reachab
 Existing HTTPS configuration must be preserved. All operations use the same
 Compose project and host paths. Application checks are deferred until HTTPS
 activation; they cannot pass while bootstrap returns `503`.
-`diagnose` checks bootstrap configuration without requiring the application.
+`diagnose` checks bootstrap configuration and its certificate without requiring
+the application. It does not issue or renew certificates.
 Host paths need appropriate creation/write permissions; the script does not
 escalate privileges. The local probe is removed after verification, including handled failures.
 
@@ -98,6 +113,42 @@ curl --fail --show-error http://PUBLIC_IP/.well-known/acme-challenge/probe
 rm runtime/certbot/www/.well-known/acme-challenge/probe
 ```
 
+## Certificate acquisition
+
+The same `start` command calls
+[`ops/certificates.py`](../../scripts/ops/certificates.py) after bootstrap validation.
+It reuses a matching certificate with at least 24 hours remaining, or calls host
+Certbot once with a 300-second timeout. Bootstrap remains active after acquisition.
+
+Requirements: Linux for issuance, Certbot 5.4+, OpenSSL 1.1.1+, a publicly reachable
+HTTP challenge path, and permission to write certificate storage. Install Certbot
+using the [official instructions](https://certbot.eff.org/instructions).
+After reviewing the [subscriber agreement](https://letsencrypt.org/repository/),
+set `ACME_AGREE_TOS=true` in `.env.deploy` to permit new issuance.
+
+| `ACME_ENV` | Host lineage directory | Trust |
+| --- | --- | --- |
+| `staging` | `LETSENCRYPT_DIR/staging/live/menu-HOST_HASH/` | Test certificate; not browser-trusted |
+| `production` | `LETSENCRYPT_DIR/production/live/menu-HOST_HASH/` | Chain checked against host OpenSSL trust roots |
+
+Each environment also has its own accounts, archive, renewal configuration,
+`work/` and `logs/`. Names are derived from `PUBLIC_HOST`; switching environments
+does not overwrite the other store. Mount the complete `LETSENCRYPT_DIR`.
+
+Certbot uses `certonly --webroot`. IPv4 requests add `--ip-address` and require
+the `shortlived` profile; domain requests use `-d`.
+[IP certificate requirements](https://letsencrypt.org/2026/03/11/shorter-certs-certbot).
+CLI arguments disable Certbot deployment hooks; this step does not reload Nginx.
+`ACME_EMAIL` remains unused and is not forwarded.
+
+Checks cover renewal-server metadata, validity dates, IP/DNS SAN, certificate/key
+matching and private-key permissions. Production also checks the trust chain at
+the current time. Malformed or mismatched lineages stop processing rather than
+being silently replaced. Structurally valid expired or near-expiry lineages are renewed.
+Failure or timeout returns nonzero, leaves bootstrap active, and reports the
+environment's Certbot log directory. `diagnose` reports missing or invalid
+certificates without contacting the CA.
+
 ## HTTPS template
 
 `nginx/templates/https.conf` requires these values:
@@ -105,7 +156,11 @@ rm runtime/certbot/www/.well-known/acme-challenge/probe
 | Placeholder | Required value |
 | --- | --- |
 | `__PUBLIC_HOST__` | Public IPv4 or domain, without scheme, port or path |
-| `__CERT_NAME__` | Actual certificate directory under the container's `/etc/letsencrypt/live/` |
+| `__ACME_ENV__` | `staging` or `production` |
+| `__CERT_NAME__` | Managed lineage name, `menu-HOST_HASH`, returned by certificate acquisition |
+
+Certificate paths inside Nginx are
+`/etc/letsencrypt/ACME_ENV/live/CERT_NAME/{fullchain,privkey}.pem`.
 
 The certificate must cover the selected IP or domain. HTTP challenges remain
 accessible; other HTTP requests redirect with `308`. HTTPS serves static/media
@@ -119,13 +174,20 @@ the configuration on disk.
 
 ## Validation
 
-Local Docker checks passed: bootstrap, mounts, temporary-certificate HTTPS,
-redirects, static/media files, proxy headers and reload. The backend was a test
-server. Public issuance, Django HTTPS login and Linux renewal remain unverified.
+Local Docker checks passed: automatic HTTP/bootstrap startup, repeat starts,
+configuration preservation, temporary-certificate HTTPS, redirects, static/media
+files and reload. A real Django menu was checked over local HTTPS. Public issuance,
+Django HTTPS login and Linux renewal remain unverified.
+
+Real Certbot 5.4 with a local Pebble CA passed IP/domain HTTP-01 issuance, IP
+`shortlived` profile, reuse, store isolation, key mismatch, CA rejection and timeout
+checks. Fixture trust roots were confined to temporary containers; no public
+Let's Encrypt request was made.
 
 ## Limitations and improvements
 
-- **Issuance:** Certbot installation and invocation are not implemented.
+- **Host provisioning:** Certbot/OpenSSL installation and storage permissions are
+  managed on the target host; the script does not install packages or run sudo.
 - **Activation:** HTTP/bootstrap preparation is automated. HTTPS template rendering
   and Django secure cookies still require configuration. Existing HTTPS gets
   container/configuration checks; application HTTPS requests require separate validation.
