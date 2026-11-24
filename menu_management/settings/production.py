@@ -36,14 +36,19 @@ DATABASES = {
     }
 }
 
-# Security settings - disabled for development
-SECURE_SSL_REDIRECT = False
-SESSION_COOKIE_SECURE = False
-CSRF_COOKIE_SECURE = False
-
-# Proxy settings
-USE_X_FORWARDED_HOST = True
-USE_X_FORWARDED_PORT = True
+# Nginx terminates TLS and overwrites X-Forwarded-Proto. Web has no host port.
+HTTPS_ENABLED = os.environ.get('DJANGO_HTTPS', 'false').lower() == 'true'
+SECURE_SSL_REDIRECT = HTTPS_ENABLED
+SECURE_REDIRECT_EXEMPT = [r'^health/$']
+SESSION_COOKIE_SECURE = HTTPS_ENABLED
+CSRF_COOKIE_SECURE = HTTPS_ENABLED
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',')
+    if origin.strip()
+]
+USE_X_FORWARDED_HOST = False
+USE_X_FORWARDED_PORT = False
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Content hashes give changed assets new URLs, avoiding stale browser caches.

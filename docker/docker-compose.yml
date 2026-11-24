@@ -51,6 +51,8 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=menu_management.settings.production
       - DJANGO_ENV=production
+      - DJANGO_HTTPS=${DJANGO_HTTPS:-false}
+      - DJANGO_CSRF_TRUSTED_ORIGINS=${DJANGO_CSRF_TRUSTED_ORIGINS:-}
     command: gunicorn menu_management.wsgi:application --bind 0.0.0.0:8000
     healthcheck:
       test:

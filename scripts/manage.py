@@ -19,7 +19,14 @@ from pathlib import Path
 
 from ops.certificates import CertificateError, ensure_certificate, inspect_certificate
 from ops.deploy_config import ConfigurationError, load_config
-from ops.nginx_runtime import RuntimePreparationError, prepare, probe, site_mode
+from ops.nginx_runtime import (
+    RuntimePreparationError,
+    https_candidate,
+    https_configuration,
+    prepare,
+    probe,
+    site_mode,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = ROOT / 'menu_management/settings/env/.env'
@@ -96,6 +103,22 @@ class Manager:
             LOGGER.info('Using deployment configuration: %s', target)
         self.deployment = config
         self.compose_environment = environment
+        try:
+            site = ROOT / 'runtime/nginx/conf.d/site.conf'
+            https = site.is_file() and site_mode(ROOT) == 'https'
+        except (RuntimePreparationError, OSError, UnicodeError) as error:
+            # Backup/status/stop remain available even with a broken Nginx configuration.
+            LOGGER.warning('Cannot infer HTTPS settings from site.conf: %s', error)
+            https = False
+        self.set_https_environment(https)
+
+    def set_https_environment(self, enabled):
+        self.compose_environment['DJANGO_HTTPS'] = 'true' if enabled else 'false'
+        self.compose_environment['DJANGO_CSRF_TRUSTED_ORIGINS'] = (
+            f'https://{self.deployment.public_host}'
+            if enabled and self.deployment is not None
+            else ''
+        )
 
     def compose(self, *args, **kwargs):
         if self.compose_environment is None:
@@ -192,12 +215,8 @@ class Manager:
         self.compose('exec', '-T', 'web', 'python', 'manage.py', 'check')
         self.compose('exec', '-T', 'web', 'python', 'manage.py', 'migrate', '--check')
         if nginx_mode == 'https':
-            self.compose('exec', '-T', 'nginx', 'nginx', '-t')
+            self.verify_https()
             self.compose('ps', '-a')
-            LOGGER.info(
-                'HTTPS configuration retained; container/config checks passed. '
-                'Verify HTTPS requests separately.'
-            )
             return
         # Exercise Docker DNS, Nginx, Django, the database-backed menu, and a static asset.
         code = """
@@ -215,6 +234,112 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
 """
         self.compose('exec', '-T', 'web', 'python', '-c', code)
         self.compose('ps', '-a')
+
+    def verify_https(self):
+        self.compose('exec', '-T', 'nginx', 'nginx', '-t')
+        certificate = None
+        if self.deployment is not None and self.deployment.tls_mode == 'letsencrypt':
+            try:
+                certificate = inspect_certificate(self.deployment)
+            except CertificateError as error:
+                raise OperationError(str(error)) from error
+            if certificate is None:
+                raise OperationError('No usable certificate for HTTPS verification.')
+        host = self.deployment.public_host if self.deployment else ''
+        # Staging certificates are trusted only for this probe, never system-wide.
+        trust = (
+            certificate.fullchain.read_text()
+            if certificate is not None and certificate.acme_env == 'staging'
+            else ''
+        )
+        code = """
+import http.client
+import os
+import socket
+import ssl
+import sys
+import time
+import django
+django.setup()
+from django.conf import settings
+host = sys.argv[1] or os.environ['ALLOWED_HOSTS'].split(',')[0].strip()
+context = ssl.create_default_context(cadata=sys.argv[2] or None)
+if sys.argv[2]:
+    context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+assert settings.SECURE_SSL_REDIRECT
+assert settings.SESSION_COOKIE_SECURE and settings.CSRF_COOKIE_SECURE
+assert settings.SECURE_PROXY_SSL_HEADER == ('HTTP_X_FORWARDED_PROTO', 'https')
+class Connection(http.client.HTTPSConnection):
+    def connect(self):
+        self.sock = context.wrap_socket(
+            socket.create_connection(('nginx', 443), timeout=10), server_hostname=host)
+for path in ('/health/', '/menu/', '/staff/login/', '/admin/login/', '/static/admin/css/base.css'):
+    for attempt in range(20):
+        connection = Connection(host, timeout=10, context=context)
+        try:
+            connection.request('GET', path)
+            response = connection.getresponse()
+            assert response.status == 200, (path, response.status)
+            if path == '/health/':
+                assert response.read().strip() == b'ok'
+            if path in ('/staff/login/', '/admin/login/'):
+                cookies = response.headers.get_all('Set-Cookie', [])
+                assert any('csrftoken=' in c and '; Secure' in c for c in cookies)
+            break
+        except (OSError, http.client.HTTPException, AssertionError):
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
+        finally:
+            connection.close()
+    print(path + ': HTTPS OK')
+connection = http.client.HTTPConnection('nginx', 80, timeout=10)
+connection.request('GET', '/menu/?probe=1', headers={'Host': host})
+response = connection.getresponse()
+assert response.status == 308
+assert response.getheader('Location') == 'https://' + host + '/menu/?probe=1'
+connection.close()
+"""
+        self.compose('exec', '-T', 'web', 'python', '-c', code, host, trust)
+        if self.deployment is not None:
+            with probe(self.deployment.certbot_webroot) as (url, expected):
+                code = (
+                    'import http.client, sys; '
+                    "c=http.client.HTTPConnection('nginx', 80, timeout=10); "
+                    "c.request('GET', sys.argv[1]); r=c.getresponse(); "
+                    'assert r.status == 200 and r.read().decode() == sys.argv[2]; c.close()'
+                )
+                self.compose('exec', '-T', 'web', 'python', '-c', code, url, expected)
+        LOGGER.info('HTTPS, redirects, login forms, secure CSRF cookies and ACME path verified.')
+
+    def activate_https(self, certificate, no_seed):
+        https_candidate(ROOT, self.deployment, certificate)
+        previous_environment = self.compose_environment.copy()
+        self.set_https_environment(True)
+        try:
+            # Prepare the backend while Nginx continues serving its previous configuration.
+            self.compose('up', '-d', '--wait', '--wait-timeout', '180', 'web')
+            if not no_seed:
+                self.compose('exec', '-T', 'web', 'python', 'manage.py', 'load_initial_data')
+            with https_configuration(ROOT, self.deployment, certificate):
+                self.compose('exec', '-T', 'nginx', 'nginx', '-t')
+                self.compose('exec', '-T', 'nginx', 'nginx', '-s', 'reload')
+                self.verify(nginx_mode='https')
+        except BaseException:
+            self.compose_environment = previous_environment
+            # The context restores site.conf before reloading the previous configuration.
+            try:
+                self.compose('exec', '-T', 'nginx', 'nginx', '-t')
+                self.compose('exec', '-T', 'nginx', 'nginx', '-s', 'reload')
+                self.compose('up', '-d', '--wait', '--wait-timeout', '180', 'web')
+            except (OperationError, OSError, subprocess.SubprocessError) as error:
+                LOGGER.error('Recovery failed; inspect site.conf and service logs: %s', error)
+            LOGGER.error(
+                'HTTPS activation failed; configuration/service recovery was attempted. '
+                'Database migrations and seeded data are not rolled back.'
+            )
+            raise
+        LOGGER.info('HTTPS enabled for %s (%s).', self.deployment.public_host, certificate.acme_env)
 
     def prepare_runtime(self, initialize=True):
         try:
@@ -449,16 +574,18 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
             self.prepare_env(hosts or 'localhost,127.0.0.1')
         self.require_env(check_hosts=True)
         runtime = self.prepare_runtime(initialize=not update)
-        if runtime.mode == 'bootstrap':
-            self.start_bootstrap(runtime)
+        if runtime.mode == 'bootstrap' or (
+            not update and self.deployment is not None and self.deployment.tls_mode == 'letsencrypt'
+        ):
+            if runtime.mode == 'bootstrap':
+                self.start_bootstrap(runtime)
+            else:
+                self.compose('up', '-d', '--no-deps', 'nginx')
             try:
                 certificate = ensure_certificate(self.deployment)
             except CertificateError as error:
                 raise OperationError(str(error)) from error
-            LOGGER.info(
-                'Certificate ready in %s. Bootstrap remains active; HTTPS activation is separate.',
-                certificate.fullchain.parent,
-            )
+            self.activate_https(certificate, args.no_seed)
             return
         if update:
             # Build failure leaves the running release untouched.
@@ -621,7 +748,7 @@ def main(argv=None):
                     manager.backup(source='destroy')  # Failure aborts deletion.
                     manager.compose('down', '--volumes')
             return 0
-    except (OperationError, OSError, subprocess.SubprocessError) as error:
+    except (OperationError, RuntimePreparationError, OSError, subprocess.SubprocessError) as error:
         # CalledProcessError includes the command: do not include captured env contents.
         detail = (
             f'Command failed (exit {error.returncode}).'
@@ -637,7 +764,7 @@ def main(argv=None):
         )
         return 1
     except KeyboardInterrupt:
-        LOGGER.warning('Interrupted. No automatic rollback or data deletion was performed.')
+        LOGGER.warning('Interrupted. Inspect service state and logs before retrying.')
         return 130
 
 

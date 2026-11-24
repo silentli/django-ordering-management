@@ -161,3 +161,64 @@ def probe(webroot):
         yield '/.well-known/acme-challenge/' + path.name, body
     finally:
         path.unlink(missing_ok=True)
+
+
+def https_candidate(root, config, certificate):
+    """Render and check ownership before changing files or starting services."""
+    site = root / 'runtime/nginx/conf.d/site.conf'
+    mode = site_mode(root)
+    previous = site.read_text()
+    rendered = (root / 'nginx/templates/https.conf').read_text()
+    for token, value in {
+        '__PUBLIC_HOST__': config.public_host,
+        '__CERT_NAME__': certificate.cert_name,
+        '__ACME_ENV__': certificate.acme_env,
+    }.items():
+        rendered = rendered.replace(token, value)
+    if previous == rendered:
+        return mode, previous, rendered
+    # Only replace bootstrap or an exact rendering of the project HTTPS template.
+    if mode == 'https':
+        normalized = previous
+        for pattern, token in (
+            (r'(?<=server_name )[^;]+', '__PUBLIC_HOST__'),
+            (r'(?<=https://)[^/$]+', '__PUBLIC_HOST__'),
+            (r'(?<=/etc/letsencrypt/)(staging|production)', '__ACME_ENV__'),
+            (r'(?<=/live/)menu-[a-f0-9]{16}', '__CERT_NAME__'),
+        ):
+            normalized = re.sub(pattern, token, normalized)
+
+        # Template comments also contain the same substituted values.
+        def body(text):
+            return re.sub(r'#[^\n]*', '', text).strip()
+
+        if body(normalized) != body((root / 'nginx/templates/https.conf').read_text()):
+            raise RuntimePreparationError(
+                'Custom HTTPS configuration was preserved; review it manually.'
+            )
+    elif mode != 'bootstrap' or template_body(previous) != template_body(
+        (root / 'nginx/templates/bootstrap.conf').read_text()
+    ):
+        raise RuntimePreparationError(
+            'Custom Nginx configuration was preserved; review it manually.'
+        )
+    return mode, previous, rendered
+
+
+@contextmanager
+def https_configuration(root, config, certificate):
+    """Restore the previous file on failure; the caller validates and reloads it."""
+    mode, previous, rendered = https_candidate(root, config, certificate)
+    if previous == rendered:
+        yield
+        return
+    site = root / 'runtime/nginx/conf.d/site.conf'
+    history = root / 'runtime/nginx/history'
+    ensure_directory(history)
+    publish(history / f'{mode}-{secrets.token_hex(8)}.conf', previous)
+    publish(site, rendered, replace=True)
+    try:
+        yield
+    except BaseException:
+        publish(site, previous, replace=True)
+        raise
