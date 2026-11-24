@@ -65,6 +65,7 @@ Selected source, configuration, and documentation paths:
 ├── ci_acceptance/             # Isolated CI tooling contracts
 ├── docs/                      # Technical documentation
 │   ├── development.md         # Development and test tooling
+│   ├── app/                   # Application behavior and security
 │   └── devops/                # CI, deployment, backup/recovery, and maintenance
 ├── entrypoint.sh              # Runtime validation, database wait, migrations
 └── manage.py                  # Django management CLI
@@ -75,6 +76,7 @@ Selected source, configuration, and documentation paths:
 | Domain | Reference | Coverage |
 | --- | --- | --- |
 | Development | [Development workflow](development.md) | Local setup, test database, pytest, Ruff, hooks |
+| Application security | [Django security](app/security.md) | Authentication, permissions, CSRF, cookies, HTTPS proxy settings and current limits |
 | Infrastructure | [DevOps overview](devops/README.md) | Service topology, storage boundaries, environment configuration |
 | Continuous integration | [CI](devops/ci.md) | Workflows, triggers, execution environments, permissions, diagnostics |
 | Releases | [Deployment](devops/deployment.md) | Initial setup, configuration, rollout, verification, rollback constraints |

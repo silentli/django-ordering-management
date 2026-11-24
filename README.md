@@ -49,6 +49,7 @@ Public deployment requires the environment checks in the
 | --- | --- |
 | [Overview](docs/README.md) | Engineering status, system architecture, operational handover |
 | [Development](docs/development.md) | Local environment, pytest, Ruff, pre-commit |
+| [Application security](docs/app/security.md) | Django authentication, CSRF, cookies and HTTPS proxy settings |
 | [DevOps](docs/devops/README.md) | Deployment topology, persistent storage, environment status |
 | [CI](docs/devops/ci.md) | Workflows, triggers, runners, permissions, failure diagnostics |
 | [Deployment](docs/devops/deployment.md) | Configuration, provisioning, release verification, rollback |

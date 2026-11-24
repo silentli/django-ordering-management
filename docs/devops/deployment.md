@@ -1,8 +1,8 @@
 # Deployment
 
 Run commands from the repository root on the Docker host. The default stack uses
-HTTP; public deployment also requires [TLS and certificates](tls.md), secure
-cookies, and restricted database exposure.
+HTTP; configure [TLS and certificates](tls.md) for HTTPS. Public deployment also
+requires restricted database exposure.
 
 ## Preconditions and configuration
 
@@ -10,8 +10,8 @@ cookies, and restricted database exposure.
 - Docker access, a writable checkout, and available host ports `80`, `443`, and `5432`.
 - For an existing deployment: its Compose project name, runtime configuration,
   source revision, image identities, and persistent volumes.
-- For public access: a public IP or domain, TLS termination, secure cookie settings,
-  and restricted database exposure. The script does not configure these.
+- For public HTTPS: a public IP or domain, certificate prerequisites from [TLS](tls.md),
+  and restricted database exposure. Firewall and DNS remain host responsibilities.
 
 The application runtime file is `menu_management/settings/env/.env`. The management script
 creates it on first start if absent; existing files are preserved.
@@ -46,7 +46,8 @@ Edit `PUBLIC_HOST` before real deployment. The example IP is documentation-only.
 Management commands that invoke Compose read `.env.deploy` when present.
 Its mount paths override same-named shell variables and are used consistently by
 startup, updates, backups and diagnostics. These are host-side Compose inputs,
-not additional environment variables injected into application containers.
+not passed wholesale to application containers. The script also derives Web HTTPS
+settings from the active Nginx configuration; see [HTTPS activation](tls.md#https-activation).
 Without the file, the existing Compose defaults and shell inputs remain in use.
 
 On first start, `PUBLIC_HOST` is included in the generated `ALLOWED_HOSTS`, along
@@ -69,7 +70,7 @@ on the host; application dependencies run in containers.
 
 | Command | Behavior |
 | --- | --- |
-| `start` | Prepare application/runtime configuration; start and verify HTTP application or TLS bootstrap |
+| `start` | Prepare application/runtime configuration; start and verify HTTP or HTTPS application |
 | `stop` | Stop services; retain containers and data |
 | `down` | Remove containers and network; retain persistent volumes |
 | `update` | Build current source, back up the database, recreate services, and verify |
@@ -120,8 +121,8 @@ python3 scripts/manage.py start
 `start` creates missing runtime directories and initializes `site.conf` from the
 HTTP template, or the bootstrap template for `TLS_MODE=letsencrypt`. Bootstrap
 starts only Nginx, verifies the HTTP challenge path, then obtains or reuses a
-certificate. It remains active until HTTPS activation. See [TLS](tls.md#http-bootstrap)
-for requirements and the command reference. Existing HTTPS configuration is preserved;
+certificate, then enables and verifies HTTPS. See [TLS](tls.md#http-bootstrap)
+for requirements and the command reference. Custom HTTPS configuration is preserved;
 runtime files are excluded from Git and Docker build contexts.
 
 If the application `.env` is absent and no project volumes exist, the script generates

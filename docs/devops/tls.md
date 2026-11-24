@@ -7,13 +7,13 @@ Deployment options in `.env.deploy`:
 | Option | Behavior |
 | --- | --- |
 | `TLS_MODE=http` | Initialize HTTP application access; do not call Certbot |
-| `TLS_MODE=letsencrypt` | Initialize bootstrap, then obtain or reuse a certificate through Certbot |
+| `TLS_MODE=letsencrypt` | Bootstrap, obtain or reuse a certificate through Certbot, then enable HTTPS |
 | `ACME_ENV=staging` | Use the Let’s Encrypt test API; certificates are not browser-trusted |
 | `ACME_ENV=production` | Use the Let’s Encrypt production API for publicly trusted certificates |
 
 The example selects `letsencrypt` and `staging`. Certbot and Let’s Encrypt are
-fixed in the implementation. Certificate acquisition does not yet activate HTTPS;
-existing HTTPS configuration is preserved when changing `TLS_MODE`.
+fixed in the implementation. `start` completes HTTPS activation after acquisition.
+Changing `TLS_MODE` to `http` does not downgrade existing HTTPS.
 
 Nginx loads only `/etc/nginx/conf.d/site.conf`, mounted from
 `runtime/nginx/conf.d/site.conf`. `start` initializes this file when absent;
@@ -68,9 +68,8 @@ The probe URL is `http://PUBLIC_IP/.well-known/acme-challenge/PROBE`.
 A valid probe returns `200` with matching content; missing files return `404`;
 application paths return `503`. A host-local check does not prove public reachability.
 
-Existing HTTPS configuration must be preserved. All operations use the same
-Compose project and host paths. Application checks are deferred until HTTPS
-activation; they cannot pass while bootstrap returns `503`.
+All operations use the same Compose project and host paths. Application checks
+run after HTTPS activation; they cannot pass while bootstrap returns `503`.
 `diagnose` checks bootstrap configuration and its certificate without requiring
 the application. It does not issue or renew certificates.
 Host paths need appropriate creation/write permissions; the script does not
@@ -118,7 +117,7 @@ rm runtime/certbot/www/.well-known/acme-challenge/probe
 The same `start` command calls
 [`ops/certificates.py`](../../scripts/ops/certificates.py) after bootstrap validation.
 It reuses a matching certificate with at least 24 hours remaining, or calls host
-Certbot once with a 300-second timeout. Bootstrap remains active after acquisition.
+Certbot once with a 300-second timeout, then proceeds to HTTPS activation.
 
 Requirements: Linux for issuance, Certbot 5.4+, OpenSSL 1.1.1+, a publicly reachable
 HTTP challenge path, and permission to write certificate storage. Install Certbot
@@ -145,11 +144,11 @@ Checks cover renewal-server metadata, validity dates, IP/DNS SAN, certificate/ke
 matching and private-key permissions. Production also checks the trust chain at
 the current time. Malformed or mismatched lineages stop processing rather than
 being silently replaced. Structurally valid expired or near-expiry lineages are renewed.
-Failure or timeout returns nonzero, leaves bootstrap active, and reports the
-environment's Certbot log directory. `diagnose` reports missing or invalid
+Failure or timeout returns nonzero, preserves the active Nginx configuration, and
+reports the environment's Certbot log directory. `diagnose` reports missing or invalid
 certificates without contacting the CA.
 
-## HTTPS template
+## HTTPS activation
 
 `nginx/templates/https.conf` requires these values:
 
@@ -166,18 +165,39 @@ The certificate must cover the selected IP or domain. HTTP challenges remain
 accessible; other HTTP requests redirect with `308`. HTTPS serves static/media
 files and proxies to `web:8000` with `X-Forwarded-Proto: https`.
 
-Activation requires valid certificates, running application services and Django
-HTTPS settings. The sequence is: preserve the active configuration → render and
-replace `site.conf` → `nginx -t` → reload → application checks. Validation failure
-requires restoring the previous file. Reload keeps the container; a restart reads
-the configuration on disk.
+`start` starts Web and its dependencies with HTTPS settings, seeds initial data
+unless `--no-seed`, then backs up and replaces `site.conf`, runs `nginx -t`, reloads
+Nginx and verifies requests. Repeated starts reuse matching configuration. An exact
+project HTTPS configuration can switch host or certificate environment; custom
+configurations stop activation before service changes and require manual review.
+
+Management commands derive `DJANGO_HTTPS=true` and
+`DJANGO_CSRF_TRUSTED_ORIGINS=https://PUBLIC_HOST` before starting Web for HTTPS;
+application credentials are unchanged. Django's proxy, CSRF and cookie behavior is
+described in [Application security](../app/security.md#https-reverse-proxy).
+For direct Compose operations that recreate Web, supply these same inputs explicitly;
+Compose alone does not read `.env.deploy` or inspect `site.conf`.
+
+Checks cover Django configuration/migrations, HTTPS health/menu/login forms/static
+assets, secure CSRF cookies, HTTP redirects and the HTTP ACME path. Production
+probes verify public trust and hostname. Staging probes trust the selected certificate
+only within the probe process; browsers still reject staging certificates.
+
+A handled activation failure restores the previous file and attempts to reload it
+and restore Web settings. Historical configurations remain under `runtime/nginx/history/`.
+Recovery failures are logged; inspect services before retrying. Database migrations
+and seeded data are not rolled back. A process kill or host failure can interrupt
+recovery; inspect `site.conf` and run `diagnose` before restarting services.
 
 ## Validation
 
-Local Docker checks passed: automatic HTTP/bootstrap startup, repeat starts,
-configuration preservation, temporary-certificate HTTPS, redirects, static/media
-files and reload. A real Django menu was checked over local HTTPS. Public issuance,
-Django HTTPS login and Linux renewal remain unverified.
+Local Docker checks passed: automatic HTTP/bootstrap-to-HTTPS startup, repeat starts,
+IP/domain configuration changes, isolated staging/production stores, redirects,
+health/menu/login/static requests, authenticated staff/admin sessions with CSRF and
+Secure cookies, and restoration after invalid configuration or failed verification.
+HTTPS checks used temporary certificates; production trust checks used a fixture root
+confined to the disposable test process/container. Public issuance, external access
+and scheduled Linux renewal remain unverified.
 
 Real Certbot 5.4 with a local Pebble CA passed IP/domain HTTP-01 issuance, IP
 `shortlived` profile, reuse, store isolation, key mismatch, CA rejection and timeout
@@ -188,8 +208,7 @@ Let's Encrypt request was made.
 
 - **Host provisioning:** Certbot/OpenSSL installation and storage permissions are
   managed on the target host; the script does not install packages or run sudo.
-- **Activation:** HTTP/bootstrap preparation is automated. HTTPS template rendering
-  and Django secure cookies still require configuration. Existing HTTPS gets
-  container/configuration checks; application HTTPS requests require separate validation.
+- **Public validation:** Verify the certificate, firewall, redirects and authenticated
+  sessions from outside the target server. HSTS is not enabled automatically.
 - **Renewal:** No certificate timer, reload hook or failure alert is configured.
   `ACME_EMAIL` is optional and unused; it does not configure notifications.

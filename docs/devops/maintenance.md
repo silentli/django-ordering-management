@@ -25,8 +25,9 @@ Keep the same `--project-name NAME` for all operations.
 
 In bootstrap mode, `diagnose` validates Nginx configuration and the managed
 certificate without requiring Web or database services. It never requests certificates.
-With existing HTTPS, it checks Django/migrations and Nginx
-configuration; verify HTTPS requests separately.
+With HTTPS, it checks Django/migrations, certificate state, HTTPS application
+responses, secure CSRF cookies, redirects and the HTTP ACME path. External reachability
+and authenticated sessions still need target-server verification.
 
 For focused inspection:
 

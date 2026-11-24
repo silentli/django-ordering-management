@@ -57,7 +57,7 @@ the database; it does not prove business operations or recovery.
 | --- | --- | --- |
 | Runtime | Python 3.12 image, Gunicorn, production settings | Deployed revision and image identities |
 | Networking | Host ports 80/443 for Nginx and 5432 for DB | Firewall, external reachability, public IP/domain |
-| TLS and cookies | Automatic bootstrap and isolated Certbot stores; secure cookies disabled | Public issuance, HTTPS activation, Django settings and renewal |
+| TLS and cookies | Automatic bootstrap, certificate acquisition, HTTPS activation and secure cookies | Public issuance, external access and scheduled renewal |
 | Secrets | Runtime `.env`; optional root `.env.admin` | Secret ownership, access, and recovery location |
 | Data | Database, static, and media volumes | Actual volume names, size, and storage location |
 | Backups | Shared log; manual/pre-release dumps; optional systemd timer or cron | Host schedule activation, offsite destination, retention, restore evidence |
