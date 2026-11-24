@@ -17,9 +17,8 @@ the subcommand; direct Compose commands require it before the operation.
 | Verification | Nonempty archive and successful `pg_restore --list` |
 | Retention / offsite / alerts | Not configured |
 
-Archive inspection does not prove restoration. A sample archive passed an isolated
-restore; see [validation](deployment.md#validation). Production
-recovery remains unverified.
+Archive inspection does not prove restoration. Rehearse recovery with the
+[isolated restore exercise](#isolated-restore-exercise).
 
 ## Scripted database backup
 
@@ -72,10 +71,12 @@ archives and log records have no automatic retention or rotation.
 | Component | Responsibility |
 | --- | --- |
 | `scripts/manage.py` | Administrator CLI and actual backup entry point |
-| `scripts/ops/backup_schedule.py` | Generate, validate, install, inspect, and disable systemd configuration |
+| `scripts/ops/schedule.py` | Generate, validate, install, inspect, and disable systemd configuration |
 | `.timer` / `.service` | Linux triggers `manage.py backup --source scheduled` at the scheduled time |
 
-Use one scheduler per installation. `start` does not enable a schedule.
+Backup scheduling defaults to `--task backup`. Certificate timers are managed
+separately with `--task certificate`; see [TLS](tls.md#certificate-renewal).
+Use one backup scheduler per installation. `start` does not enable a schedule.
 
 ### systemd timer
 

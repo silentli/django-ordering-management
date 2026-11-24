@@ -78,8 +78,8 @@ Compose inputs and recovery.
 - `STAFF_PASSWORD` bypasses configured password validators: the custom login uses
   `set_password()` without `validate_password()`.
 - `StaffLogoutView` uses GET, allowing cross-site forced logout; it should use POST.
-- HSTS is disabled. Local HTTPS login checks passed; public verification and
-  scheduled renewal remain pending in [TLS](../devops/tls.md#validation).
+- HSTS is disabled. [Renewal scheduling](../devops/tls.md#certificate-renewal)
+  requires host activation.
 - [Django 5.1.0](../../requirements/base.txt) is pinned and
   [no longer supported](https://docs.djangoproject.com/en/5.1/topics/security/).
   Production maintenance requires a supported version and security updates.

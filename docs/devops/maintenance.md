@@ -25,9 +25,11 @@ Keep the same `--project-name NAME` for all operations.
 
 In bootstrap mode, `diagnose` validates Nginx configuration and the managed
 certificate without requiring Web or database services. It never requests certificates.
-With HTTPS, it checks Django/migrations, certificate state, HTTPS application
-responses, secure CSRF cookies, redirects and the HTTP ACME path. External reachability
+With HTTPS, it reports certificate expiry and timer state, and checks Django/migrations,
+HTTPS application responses, secure CSRF cookies, redirects and the HTTP ACME path.
+External reachability
 and authenticated sessions still need target-server verification.
+Renewal commands and logs are described in [TLS](tls.md#certificate-renewal).
 
 For focused inspection:
 
@@ -88,7 +90,7 @@ Assign responsibility and adjust frequency to the environment's recovery objecti
 | Monthly, initially | Isolated restore and access review | Recovery exercise and access review record |
 | After personnel or host changes | Access, secret references, project/volume identity | Updated restricted environment inventory |
 
-Host patching and TLS renewal procedures depend on the hosting setup and are not
+Host patching procedures depend on the hosting setup and are not
 defined in the repository. Container restarts alone do not update the image's
 installed packages.
 

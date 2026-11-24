@@ -78,7 +78,8 @@ on the host; application dependencies run in containers.
 | `logs [-f]` | Show recent logs; `-f` streams until Ctrl+C |
 | `diagnose [--config PATH]` | Check deployment parameters, Docker, status/logs and the running application |
 | `backup` | Create and inspect a database archive |
-| `schedule install --user USER` | Test backup, install and enable a Linux systemd timer; requires sudo |
+| `renew-certificate` | Check/renew the configured certificate and reload Nginx when needed |
+| `schedule install --user USER [--task TASK]` | Run the task once, install and enable its Linux timer; requires sudo |
 | `schedule status` | Show the timer and last service result |
 | `schedule disable` | Disable future timer activations; requires sudo |
 | `destroy --confirm docker` | Back up the database, then remove containers and volumes |
@@ -102,12 +103,14 @@ python3 scripts/manage.py --project-name staging status
 python3 scripts/manage.py status --project-name staging
 ```
 
-Application lifecycle and standalone backup commands share a checkout lock.
+Application lifecycle, backup and certificate renewal commands share a checkout lock.
 Timer configuration, direct Compose, and other checkouts are outside that lock.
 
 Manual and scheduled backups share `data/backups/backup.log`, including backups
 before updates/deletion. See [backup logging and scheduling](backup-and-restore.md#shared-backup-log)
-for the systemd installer and cron alternative; schedules are not installed by `start`.
+for backup scheduling and [TLS](tls.md#certificate-renewal) for certificate renewal.
+`schedule` defaults to backup; select `--task certificate` for renewal. Schedules
+are not installed by `start`.
 
 ## First deployment
 
@@ -262,21 +265,10 @@ reversal or replacement requires a verified backup and an explicit recovery plan
 that accounts for lost writes. The [isolated restore exercise](backup-and-restore.md#isolated-restore-exercise)
 is not a production cutover procedure.
 
-## Validation
-
-| Check | Local evidence |
-| --- | --- |
-| Lifecycle, 2026-11-19 | Isolated Docker Desktop setup, resume, recreation, update, confirmed deletion; credentials/data persisted |
-| Application and host-script tests, 2026-11-20 | Passed on Linux Python 3.12 |
-| Backup audit, 2026-11-20 | Manual/scheduled success and failure share a private log; isolated PostgreSQL 14 archive restored |
-| Timer configuration, 2026-11-20 | Generated units passed Linux systemd 249 validation; no host activation |
-| Deployment parameters, 2026-11-23 | CLI validation rejected invalid files/formats; configuration reading did not modify files |
-
 ## Limitations and improvements
 
-- **Production readiness:** Native Linux provisioning and public HTTPS remain
-  unverified. Complete the host inventory and verify TLS and database restrictions.
+- **Production readiness:** Complete the host inventory and verify public HTTPS
+  and database restrictions on the target host.
 - **Release reproducibility:** Retain release images; source rebuilds use mutable
   base tags and unpinned transitive dependencies.
-- **Recovery:** Production cutover and rollback remain unverified. Rehearse the
-  recovery plan before public deployment.
+- **Recovery:** Rehearse production cutover and rollback before public deployment.

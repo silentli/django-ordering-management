@@ -2,9 +2,7 @@
 
 ## Engineering status
 
-Implementation status reflects the source. Local validation is recorded in
-[Deployment](devops/deployment.md#validation); current GitHub
-Actions results and production environments require separate verification.
+Implementation status reflects the source.
 
 ### Development
 

@@ -189,20 +189,60 @@ Recovery failures are logged; inspect services before retrying. Database migrati
 and seeded data are not rolled back. A process kill or host failure can interrupt
 recovery; inspect `site.conf` and run `diagnose` before restarting services.
 
-## Validation
+## Certificate renewal
 
-Local Docker checks passed: automatic HTTP/bootstrap-to-HTTPS startup, repeat starts,
-IP/domain configuration changes, isolated staging/production stores, redirects,
-health/menu/login/static requests, authenticated staff/admin sessions with CSRF and
-Secure cookies, and restoration after invalid configuration or failed verification.
-HTTPS checks used temporary certificates; production trust checks used a fixture root
-confined to the disposable test process/container. Public issuance, external access
-and scheduled Linux renewal remain unverified.
+Requires active HTTPS matching `.env.deploy`, Linux, Certbot 5.4+, OpenSSL 1.1.1+,
+Docker access, and write access to the certificate store, webroot and `runtime/logs`.
 
-Real Certbot 5.4 with a local Pebble CA passed IP/domain HTTP-01 issuance, IP
-`shortlived` profile, reuse, store isolation, key mismatch, CA rejection and timeout
-checks. Fixture trust roots were confined to temporary containers; no public
-Let's Encrypt request was made.
+```sh
+python3 scripts/manage.py renew-certificate
+```
+
+| Step | Behavior |
+| --- | --- |
+| Preflight | Acquire deployment lock; check managed site, Nginx and HTTP challenge path |
+| Renew | `certbot renew` checks the selected environment/lineage; renew only when due |
+| Load | Validate certificate → `nginx -t` → compare live SHA-256 fingerprint → reload if different → verify |
+| Retry | A later run loads a pending certificate even when no further renewal is due |
+| Failure | Nonzero exit; failed renewal/validation prevents reload; renewed files remain for retry |
+
+Manual and scheduled attempts share `runtime/logs/certificates.log` (JSON lines,
+mode `600`): source, stage, outcome, expiry, fingerprint and duration.
+Certbot details: `LETSENCRYPT_DIR/ACME_ENV/logs/`. Rotate/archive the project log.
+`diagnose` reports expiry and timer state.
+
+### systemd timer
+
+Requires a persistent checkout, Linux/systemd, rootful Docker (`docker.service`),
+sudo, `runuser`, and an existing deployment user with the permissions above.
+Preview works on Mac; installation runs a real renewal check and may renew/reload.
+
+```sh
+python3 scripts/manage.py schedule install --task certificate --user "$USER" --dry-run
+sudo /usr/bin/python3 scripts/manage.py schedule install --task certificate --user "$USER"
+python3 scripts/manage.py schedule status --task certificate
+journalctl -u menu-certificate-docker.service -n 50 --no-pager
+sudo /usr/bin/python3 scripts/manage.py schedule disable --task certificate
+```
+
+Installation: validate units → check renewal as `--user` → write units → enable timer.
+Templates: [service](../../scripts/systemd/menu-certificate.service.example),
+[timer](../../scripts/systemd/menu-certificate.timer.example).
+Installer: [`ops/schedule.py`](../../scripts/ops/schedule.py).
+
+| Setting | Behavior |
+| --- | --- |
+| Units | `/etc/systemd/system/menu-certificate-PROJECT.{service,timer}` |
+| Schedule | `00:00` and `12:00 UTC`, plus up to 30 minutes random delay |
+| Catch-up | `Persistent=true` runs a missed check after downtime |
+| Failure | Three-start limit per hour; 15-minute retry delay; 10-minute attempt timeout |
+| Disable | Stops timer activations; active attempts/retries and manual execution remain |
+
+Foreign/manual units are preserved. Activation failure may leave unit files; inspect
+status/journal before retrying. Use one renewal scheduler per store: explicit conflicts
+with detected Certbot timers are rejected; review cron and indirect overlaps manually.
+External jobs are left unchanged. `--task` defaults to backup; `--at` and `--timezone`
+apply only to backups.
 
 ## Limitations and improvements
 
@@ -210,5 +250,5 @@ Let's Encrypt request was made.
   managed on the target host; the script does not install packages or run sudo.
 - **Public validation:** Verify the certificate, firewall, redirects and authenticated
   sessions from outside the target server. HSTS is not enabled automatically.
-- **Renewal:** No certificate timer, reload hook or failure alert is configured.
-  `ACME_EMAIL` is optional and unused; it does not configure notifications.
+- **Alerts:** Renewal failures are recorded in the project log and service journal;
+  no external alerting is configured. `ACME_EMAIL` remains optional and unused.

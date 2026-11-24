@@ -1,8 +1,6 @@
 # DevOps overview
 
-Scope: Docker Compose deployment and GitHub Actions CI. Local rehearsal evidence:
-[validation record](deployment.md#validation). Production state
-and host schedule activation require target-server verification.
+Scope: Docker Compose deployment and GitHub Actions CI.
 
 ## Operations entry points
 
@@ -57,7 +55,7 @@ the database; it does not prove business operations or recovery.
 | --- | --- | --- |
 | Runtime | Python 3.12 image, Gunicorn, production settings | Deployed revision and image identities |
 | Networking | Host ports 80/443 for Nginx and 5432 for DB | Firewall, external reachability, public IP/domain |
-| TLS and cookies | Automatic bootstrap, certificate acquisition, HTTPS activation and secure cookies | Public issuance, external access and scheduled renewal |
+| TLS and cookies | Automatic bootstrap, certificate acquisition, HTTPS activation, secure cookies and renewal timer installer | Public issuance, external access and timer activation |
 | Secrets | Runtime `.env`; optional root `.env.admin` | Secret ownership, access, and recovery location |
 | Data | Database, static, and media volumes | Actual volume names, size, and storage location |
 | Backups | Shared log; manual/pre-release dumps; optional systemd timer or cron | Host schedule activation, offsite destination, retention, restore evidence |
