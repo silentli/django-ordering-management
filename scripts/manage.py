@@ -17,6 +17,7 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ops.certificates import CertificateError, ensure_certificate, inspect_certificate
 from ops.deploy_config import ConfigurationError, load_config
 from ops.nginx_runtime import RuntimePreparationError, prepare, probe, site_mode
 
@@ -304,11 +305,26 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
             if mode == 'bootstrap':
                 self.compose('exec', '-T', 'nginx', 'nginx', '-t')
                 LOGGER.info('Bootstrap configuration is active; application checks are deferred.')
+                if self.deployment is None:
+                    raise CertificateError(
+                        'A deployment configuration is required to inspect certificates.'
+                    )
+                certificate = inspect_certificate(self.deployment)
+                if certificate is None:
+                    raise CertificateError(
+                        'No usable managed certificate was found for this deployment.'
+                    )
+                LOGGER.info(
+                    'Certificate expires %s (%s).',
+                    certificate.expires_at.isoformat(),
+                    certificate.acme_env,
+                )
             else:
                 self.verify(nginx_mode=mode)
         except (
             OperationError,
             RuntimePreparationError,
+            CertificateError,
             OSError,
             subprocess.SubprocessError,
         ) as error:
@@ -317,7 +333,7 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
                 if isinstance(error, subprocess.CalledProcessError)
                 else str(error)
             )
-            LOGGER.error('Application checks failed: %s', detail)
+            LOGGER.error('Deployment checks failed: %s', detail)
             failed = True
         return 1 if failed else 0
 
@@ -435,6 +451,14 @@ for path in ('/health/', '/menu/', '/staff/login/', '/static/admin/css/base.css'
         runtime = self.prepare_runtime(initialize=not update)
         if runtime.mode == 'bootstrap':
             self.start_bootstrap(runtime)
+            try:
+                certificate = ensure_certificate(self.deployment)
+            except CertificateError as error:
+                raise OperationError(str(error)) from error
+            LOGGER.info(
+                'Certificate ready in %s. Bootstrap remains active; HTTPS activation is separate.',
+                certificate.fullchain.parent,
+            )
             return
         if update:
             # Build failure leaves the running release untouched.

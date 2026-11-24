@@ -35,7 +35,7 @@ def site_mode(root):
         content = site.read_text(encoding='utf-8')
     except UnicodeError as error:
         raise RuntimePreparationError('Active Nginx configuration must be UTF-8 text.') from error
-    if '__PUBLIC_HOST__' in content or '__CERT_NAME__' in content:
+    if any(marker in content for marker in ('__PUBLIC_HOST__', '__CERT_NAME__', '__ACME_ENV__')):
         raise RuntimePreparationError('HTTPS template placeholders have not been rendered.')
     directives = re.sub(r'#[^\n]*', '', content)
     if re.search(r'\blisten\s+(?:[^\s;]+:)?443\b[^;]*\bssl\b', directives):

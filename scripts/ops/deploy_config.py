@@ -18,6 +18,7 @@ class DeploymentConfig:
     acme_env: str
     certbot_webroot: Path
     letsencrypt_dir: Path
+    acme_agree_tos: bool = False
 
     def compose_environment(self):
         """Host-side interpolation inputs, not service environment variables."""
@@ -40,6 +41,7 @@ DEFAULTS = {
     'ACME_ENV': 'staging',
     'CERTBOT_WEBROOT': '/var/www/certbot',
     'LETSENCRYPT_DIR': '/etc/letsencrypt',
+    'ACME_AGREE_TOS': 'false',
 }
 KEYS = {'PUBLIC_HOST', 'ACME_EMAIL', *DEFAULTS}
 
@@ -130,6 +132,8 @@ def load_config(path):
         raise ConfigurationError('TLS_MODE must be http or letsencrypt.')
     if values['ACME_ENV'] not in ('staging', 'production'):
         raise ConfigurationError('ACME_ENV must be staging or production.')
+    if values['ACME_AGREE_TOS'].lower() not in ('true', 'false'):
+        raise ConfigurationError('ACME_AGREE_TOS must be true or false.')
     webroot = absolute_path('CERTBOT_WEBROOT', values['CERTBOT_WEBROOT'])
     certificates = absolute_path('LETSENCRYPT_DIR', values['LETSENCRYPT_DIR'])
     if (
@@ -147,4 +151,5 @@ def load_config(path):
         acme_env=values['ACME_ENV'],
         certbot_webroot=webroot,
         letsencrypt_dir=certificates,
+        acme_agree_tos=values['ACME_AGREE_TOS'].lower() == 'true',
     )
