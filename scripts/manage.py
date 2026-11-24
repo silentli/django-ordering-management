@@ -3,6 +3,7 @@
 
 import argparse
 import fcntl
+import hashlib
 import http.client
 import json
 import logging
@@ -10,6 +11,8 @@ import os
 import re
 import secrets
 import signal
+import socket
+import ssl
 import subprocess
 import sys
 import time
@@ -17,7 +20,14 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ops.certificates import CertificateError, ensure_certificate, inspect_certificate
+from ops.certificates import (
+    CertificateError,
+    ensure_certificate,
+    fingerprint,
+    inspect_certificate,
+    renew_certificate,
+    renewal_record,
+)
 from ops.deploy_config import ConfigurationError, load_config
 from ops.nginx_runtime import (
     RuntimePreparationError,
@@ -301,6 +311,12 @@ assert response.getheader('Location') == 'https://' + host + '/menu/?probe=1'
 connection.close()
 """
         self.compose('exec', '-T', 'web', 'python', '-c', code, host, trust)
+        if certificate is not None:
+            LOGGER.info(
+                'Certificate expires %s (%s).',
+                certificate.expires_at.isoformat(),
+                certificate.acme_env,
+            )
         if self.deployment is not None:
             with probe(self.deployment.certbot_webroot) as (url, expected):
                 code = (
@@ -340,6 +356,102 @@ connection.close()
             )
             raise
         LOGGER.info('HTTPS enabled for %s (%s).', self.deployment.public_host, certificate.acme_env)
+
+    def nginx_endpoint(self, port):
+        result = self.compose(
+            'port', 'nginx', str(port), capture_output=True, text=True, timeout=15
+        )
+        try:
+            address, published = result.stdout.strip().splitlines()[0].rsplit(':', 1)
+            address = address.strip('[]')
+            address = {'0.0.0.0': '127.0.0.1', '::': '::1'}.get(address, address)
+            return address, int(published)
+        except (IndexError, ValueError) as error:
+            raise OperationError(f'Cannot find the published Nginx port {port}.') from error
+
+    def served_fingerprint(self, endpoint):
+        # No application data is sent. Only an exact match to the validated local
+        # certificate is accepted; expiry must not prevent replacement of an old leaf.
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        try:
+            with socket.create_connection(endpoint, timeout=5) as connection:
+                with context.wrap_socket(
+                    connection, server_hostname=self.deployment.public_host
+                ) as tls:
+                    return hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
+        except OSError:
+            return None
+
+    def renew(self, source='manual'):
+        with renewal_record(ROOT, self.project, source) as record:
+            with operation_lock():
+                record['stage'] = 'preflight'
+                self.preflight()
+                config = self.deployment
+                if config is None or config.tls_mode != 'letsencrypt':
+                    raise OperationError('Renewal requires .env.deploy with TLS_MODE=letsencrypt.')
+                record.update(host=config.public_host, acme_env=config.acme_env)
+                self.require_env()
+                if site_mode(ROOT) != 'https':
+                    raise OperationError(
+                        'Renewal requires active HTTPS; complete setup with start.'
+                    )
+                previous = inspect_certificate(config, allow_expired=True)
+                if previous is None:
+                    raise OperationError('Managed certificate is missing; run start first.')
+                _, active, expected = https_candidate(ROOT, config, previous)
+                if (
+                    re.sub(r'#[^\n]*', '', active).strip()
+                    != re.sub(r'#[^\n]*', '', expected).strip()
+                ):
+                    raise OperationError(
+                        'Active HTTPS differs from .env.deploy; apply it with start first.'
+                    )
+                record['stage'] = 'nginx-preflight'
+                self.compose('exec', '-T', 'nginx', 'nginx', '-t', timeout=30)
+                # Check the running webroot without starting services.
+                with probe(config.certbot_webroot) as (url, body):
+                    connection = http.client.HTTPConnection(*self.nginx_endpoint(80), timeout=5)
+                    try:
+                        connection.request('GET', url, headers={'Host': config.public_host})
+                        response = connection.getresponse()
+                        if response.status != 200 or response.read(len(body) + 1) != body.encode():
+                            raise OperationError('Nginx ACME webroot does not match .env.deploy.')
+                    finally:
+                        connection.close()
+                endpoint = self.nginx_endpoint(443)
+                record['stage'] = 'renewal'
+                certificate, changed = renew_certificate(config)
+                expected_fingerprint = fingerprint(certificate)
+                record.update(
+                    renewed=changed,
+                    expires_at=certificate.expires_at.isoformat(),
+                    fingerprint=expected_fingerprint,
+                    reloaded=False,
+                )
+                record['stage'] = 'nginx-validation'
+                self.compose('exec', '-T', 'nginx', 'nginx', '-t', timeout=30)
+                if self.served_fingerprint(endpoint) != expected_fingerprint:
+                    record['stage'] = 'reload'
+                    self.compose('exec', '-T', 'nginx', 'nginx', '-s', 'reload', timeout=30)
+                    record['reloaded'] = True
+                    record['stage'] = 'verify-loaded'
+                    deadline = time.monotonic() + 10
+                    while self.served_fingerprint(endpoint) != expected_fingerprint:
+                        if time.monotonic() >= deadline:
+                            raise OperationError(
+                                'Nginx is not serving the validated certificate; retry renewal.'
+                            )
+                        time.sleep(0.2)
+                record['stage'] = 'completed'
+                LOGGER.info(
+                    'Certificate check complete: renewed=%s, reloaded=%s, expires=%s',
+                    changed,
+                    record['reloaded'],
+                    certificate.expires_at.isoformat(),
+                )
 
     def prepare_runtime(self, initialize=True):
         try:
@@ -423,6 +535,12 @@ connection.close()
             LOGGER.error('Docker preflight failed: %s', error)
             return 1
         self.diagnostics()
+        from ops.schedule import certificate_timer_status
+
+        try:
+            LOGGER.info('Certificate timer: %s', certificate_timer_status(self.project))
+        except (OSError, subprocess.SubprocessError) as error:
+            LOGGER.warning('Certificate timer status unavailable: %s', error)
         failed = False
         try:
             self.require_env(check_hosts=True)
@@ -612,7 +730,7 @@ def parse_args(argv=None):
         epilog=(
             'Lifecycle: start, update, stop, down, destroy\n'
             'Inspection: status, logs, diagnose\n'
-            'Data protection: backup, schedule\n'
+            'Maintenance: backup, renew-certificate, schedule\n'
             'Use COMMAND --help for options. --project-name may appear before or after a command.'
         ),
     )
@@ -660,20 +778,24 @@ def parse_args(argv=None):
         default='manual',
         help=argparse.SUPPRESS,  # Internal timer/cron audit metadata.
     )
+    renew = sub.add_parser(
+        'renew-certificate', help='Renew the managed certificate and reload Nginx when needed'
+    )
+    renew.add_argument(
+        '--source', choices=('manual', 'scheduled'), default='manual', help=argparse.SUPPRESS
+    )
     logs = sub.add_parser('logs', help='Show recent logs')
     logs.add_argument('-f', '--follow', action='store_true', help='Stream logs until interrupted')
-    schedule = sub.add_parser('schedule', help='Manage a Linux systemd backup timer')
+    schedule = sub.add_parser('schedule', help='Manage Linux systemd backup or certificate timers')
     schedule_commands = schedule.add_subparsers(dest='schedule_action', required=True)
     install = schedule_commands.add_parser(
-        'install', help='Test backup, install, and enable the timer'
+        'install', help='Run the task once, install, and enable its timer'
     )
     install.add_argument(
         '--user', required=True, help='Existing deployment account with Docker access'
     )
-    install.add_argument('--at', default='03:00', help='Daily HH:MM (default 03:00)')
-    install.add_argument(
-        '--timezone', default='Europe/Berlin', help='IANA timezone (default Europe/Berlin)'
-    )
+    install.add_argument('--at', help='Backup only: daily HH:MM (default 03:00)')
+    install.add_argument('--timezone', help='Backup only: IANA timezone (default Europe/Berlin)')
     install.add_argument(
         '--dry-run', action='store_true', help='Preview units without changing the host'
     )
@@ -681,6 +803,13 @@ def parse_args(argv=None):
     schedule_commands.add_parser(
         'disable', help='Disable future runs; retain units, backups, and logs'
     )
+    for command in (schedule, *schedule_commands.choices.values()):
+        command.add_argument(
+            '--task',
+            choices=('backup', 'certificate'),
+            default='backup' if command is schedule else argparse.SUPPRESS,
+            help='Scheduled task (default: backup)',
+        )
     destroy = sub.add_parser(
         'destroy', help='Back up DB, then delete containers AND project volumes'
     )
@@ -718,13 +847,16 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     args = parse_args(argv)
     if args.action == 'schedule':
-        from ops.backup_schedule import handle
+        from ops.schedule import handle
 
         return handle(ROOT, args.project_name, args)
     manager = Manager(args.project_name)
     try:
         if args.action == 'diagnose':
             return manager.diagnose(args.config)
+        if args.action == 'renew-certificate':
+            manager.renew(source=args.source)
+            return 0
         if args.action == 'backup':
             # Include lock conflicts and preflight errors in the same audit as dump failures.
             manager.backup(source=args.source, prepare=True)
@@ -748,7 +880,14 @@ def main(argv=None):
                     manager.backup(source='destroy')  # Failure aborts deletion.
                     manager.compose('down', '--volumes')
             return 0
-    except (OperationError, RuntimePreparationError, OSError, subprocess.SubprocessError) as error:
+    except (
+        OperationError,
+        RuntimePreparationError,
+        CertificateError,
+        OSError,
+        http.client.HTTPException,
+        subprocess.SubprocessError,
+    ) as error:
         # CalledProcessError includes the command: do not include captured env contents.
         detail = (
             f'Command failed (exit {error.returncode}).'
@@ -756,6 +895,11 @@ def main(argv=None):
             else str(error)
         )
         LOGGER.error('%s', detail)
+        if args.action == 'renew-certificate':
+            LOGGER.error(
+                'Check runtime/logs/certificates.log and Certbot logs; no services were restarted.'
+            )
+            return 1
         if args.action not in ('logs', 'status'):
             manager.diagnostics()
         LOGGER.error(

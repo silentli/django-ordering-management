@@ -1,16 +1,20 @@
 """Acquire and inspect Certbot certificates; never activate or reload Nginx."""
 
 import configparser
+import fcntl
 import hashlib
 import ipaddress
+import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import ssl
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -156,17 +160,17 @@ def inspect(config, openssl, minimum_remaining=0):
     )
     if certificate_public.strip() != private_public.strip():
         raise CertificateError('Certificate and private key do not match.')
-    if expires - time.time() < minimum_remaining:
+    if minimum_remaining is not None and expires - time.time() < minimum_remaining:
         return None
     return Certificate(
         fullchain, key, name, config.acme_env, datetime.fromtimestamp(expires, timezone.utc)
     )
 
 
-def inspect_certificate(config):
+def inspect_certificate(config, allow_expired=False):
     """Read certificate state without issuing, renewing or changing any files."""
     openssl = executable('openssl', (1, 1, 1), r'OpenSSL (\d+)\.(\d+)\.(\d+)')
-    return inspect(config, openssl)
+    return inspect(config, openssl, minimum_remaining=None if allow_expired else 0)
 
 
 def ensure_certificate(config):
@@ -260,3 +264,121 @@ def ensure_certificate(config):
         certificate.expires_at.isoformat(),
     )
     return certificate
+
+
+def fingerprint(certificate):
+    end = '-----END CERTIFICATE-----'
+    leaf = certificate.fullchain.read_text().split(end, 1)[0] + end
+    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(leaf)).hexdigest()
+
+
+def renew_certificate(config):
+    """Let Certbot decide when an existing lineage is due; never force issuance."""
+    if sys.platform != 'linux':
+        raise CertificateError('Certificate renewal requires a Linux host; no request was sent.')
+    openssl = executable('openssl', (1, 1, 1), r'OpenSSL (\d+)\.(\d+)\.(\d+)')
+    certbot = executable('certbot', (5, 4, 0), r'certbot\s+(\d+)\.(\d+)\.(\d+)')
+    # Validate even an expired lineage before allowing Certbot to replace it.
+    previous = inspect(config, openssl, minimum_remaining=None)
+    if previous is None:
+        raise CertificateError('Managed certificate is missing; complete setup with start first.')
+    before = fingerprint(previous)
+    directory = config.letsencrypt_dir / config.acme_env
+    logs = directory / 'logs'
+    command = [
+        certbot,
+        'renew',
+        '--non-interactive',
+        '--no-random-sleep-on-renew',
+        '--cert-name',
+        previous.cert_name,
+        '--server',
+        SERVERS[config.acme_env],
+        '--config-dir',
+        str(directory),
+        '--work-dir',
+        str(directory / 'work'),
+        '--logs-dir',
+        str(logs),
+        '--webroot',
+        '--webroot-path',
+        str(config.certbot_webroot),
+        '--preferred-challenges',
+        'http',
+        '--email',
+        '',
+        '--no-eff-email',
+        '--pre-hook',
+        '',
+        '--post-hook',
+        '',
+        '--deploy-hook',
+        '',
+        '--no-directory-hooks',
+    ]
+    LOGGER.info(
+        'Checking %s certificate renewal for %s; Certbot logs: %s',
+        config.acme_env,
+        config.public_host,
+        logs,
+    )
+    try:
+        run(command, 'Certbot renewal', timeout=CERTBOT_TIMEOUT)
+    except CertificateError as error:
+        raise CertificateError(f'{error} Check Certbot logs at {logs}.') from error
+    certificate = inspect(config, openssl)
+    if certificate is None:
+        raise CertificateError('Certbot finished without a currently valid managed certificate.')
+    return certificate, before != fingerprint(certificate)
+
+
+def write_renewal_event(root, event):
+    directory = root / 'runtime/logs'
+    directory.mkdir(parents=True, exist_ok=True)
+    line = json.dumps({'timestamp': datetime.now(timezone.utc).isoformat(), **event}) + '\n'
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, 'O_NOFOLLOW', 0)
+    fd = os.open(directory / 'certificates.log', flags, 0o600)
+    with os.fdopen(fd, 'a') as target:
+        fcntl.flock(target, fcntl.LOCK_EX)
+        os.fchmod(target.fileno(), 0o600)
+        target.write(line)
+        target.flush()
+        os.fsync(target.fileno())
+
+
+@contextmanager
+def renewal_record(root, project, source):
+    record = {'run_id': secrets.token_hex(8), 'project': project, 'source': source, 'stage': 'lock'}
+    started = time.monotonic()
+    write_renewal_event(root, {**record, 'status': 'started'})
+    try:
+        yield record
+    except BaseException as error:
+        detail = (
+            f'Command failed (exit {error.returncode}).'
+            if isinstance(error, subprocess.CalledProcessError)
+            else str(error) or type(error).__name__
+        )
+        try:
+            write_renewal_event(
+                root,
+                {
+                    **record,
+                    'status': 'failed',
+                    'error': detail,
+                    'error_type': type(error).__name__,
+                    'duration_seconds': round(time.monotonic() - started, 3),
+                },
+            )
+        except OSError as log_error:
+            LOGGER.error('Cannot record certificate failure: %s', log_error)
+        raise
+    else:
+        write_renewal_event(
+            root,
+            {
+                **record,
+                'status': 'success',
+                'duration_seconds': round(time.monotonic() - started, 3),
+            },
+        )

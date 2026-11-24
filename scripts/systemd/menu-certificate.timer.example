@@ -1,0 +1,15 @@
+# Automatic setup: manage.py schedule install --task certificate generates these units.
+# Manual setup: match Unit to the installed service; enable this timer with systemctl.
+# UTC checks twice daily, with jitter and catch-up after host downtime.
+
+[Unit]
+Description=Twice-daily menu certificate renewal check
+
+[Timer]
+OnCalendar=*-*-* 00,12:00:00 UTC
+RandomizedDelaySec=30min
+Persistent=true
+Unit=menu-certificate.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,28 @@
+# Automatic setup: manage.py schedule install --task certificate --user DEPLOY_USER (sudo).
+# Manual setup: replace User and both checkout paths; use the same Compose project.
+# The user needs Docker access, Certbot on PATH, .env/.env.deploy read access,
+# and write access to the certificate/webroot directories and runtime/logs.
+# Install as menu-certificate.service with the matching timer; do not duplicate
+# an existing Certbot job targeting the same certificate directory.
+
+[Unit]
+Description=Menu application certificate renewal
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+# Replace the user and both checkout paths before installation.
+User=menu-deploy
+WorkingDirectory=/opt/django-ordering-management
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
+ExecStart=/usr/bin/python3 /opt/django-ordering-management/scripts/manage.py renew-certificate --source scheduled
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=10min
+Restart=on-failure
+RestartSec=15min
