@@ -1,7 +1,16 @@
 # Menu Management System
 
 A Django application for menu management, inventory tracking, and order processing,
-with customer and staff interfaces.
+with customer/staff interfaces and automated Docker Compose operations.
+
+## Core features
+
+- **Customer ordering:** menu browsing, session cart and transactional checkout.
+- **Staff management:** menu editing, inventory, low-stock views and order processing.
+- **Deployment:** one host CLI for initial setup, updates, diagnostics and generated credentials.
+- **HTTPS:** Nginx with host Certbot for IPv4/domain certificates, bootstrap,
+  activation and scheduled renewal.
+- **Backups:** manual or scheduled PostgreSQL backups with a shared audit log.
 
 ## Stack
 
@@ -14,6 +23,8 @@ with customer and staff interfaces.
 | PostgreSQL | 14 |
 
 ## Quick start
+
+A fresh checkout starts in HTTP mode.
 
 Prerequisites: Git, Python 3.10+ on the Linux host, Docker, and
 [Docker Compose 2.24.0+](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/).
@@ -37,11 +48,10 @@ exits successfully. Open the [customer menu](http://localhost/menu/) or
 [staff login](http://localhost/staff/login/).
 
 See the [management commands](docs/devops/deployment.md#automated-host-management)
-for start/update, stop/removal, status/logs, diagnosis, and backup scheduling.
+for lifecycle operations, diagnostics, manual backups/renewal and systemd scheduling.
 
-This starts the production settings profile with the repository's HTTP configuration.
-Public deployment requires the environment checks in the
-[deployment guide](docs/devops/deployment.md).
+For a public server, follow [Deployment](docs/devops/deployment.md) and
+[TLS and certificates](docs/devops/tls.md) for host configuration and HTTPS setup.
 
 ## Documentation
 
@@ -53,6 +63,6 @@ Public deployment requires the environment checks in the
 | [DevOps](docs/devops/README.md) | Deployment topology, persistent storage, environment status |
 | [CI](docs/devops/ci.md) | Workflows, triggers, runners, permissions, failure diagnostics |
 | [Deployment](docs/devops/deployment.md) | Configuration, provisioning, release verification, rollback |
-| [TLS and certificates](docs/devops/tls.md) | HTTP bootstrap, certificate mounts, HTTPS configuration and limitations |
+| [TLS and certificates](docs/devops/tls.md) | Certificate issuance, HTTP bootstrap, HTTPS activation and scheduled renewal |
 | [Backup and restore](docs/devops/backup-and-restore.md) | Manual/scheduled backups, shared log, restore validation |
 | [Maintenance](docs/devops/maintenance.md) | Service diagnostics, incident triage, recurring checks |
